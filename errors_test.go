@@ -63,3 +63,88 @@ func TestAuthSigV4Kind(t *testing.T) {
 		t.Errorf("AuthSigV4 = %q, want sigv4", llm.AuthSigV4)
 	}
 }
+
+func TestCounterSupportError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		err      *llm.CounterSupportError
+		provider llm.Provider
+		reason   llm.CounterSupportReason
+	}{
+		{
+			name:     "unsupported gateway is inspectable",
+			err:      &llm.CounterSupportError{Provider: llm.ProviderOpenRouter, Reason: llm.CounterSupportExactUnavailable},
+			provider: llm.ProviderOpenRouter,
+			reason:   llm.CounterSupportExactUnavailable,
+		},
+		{
+			name:     "zero value is safe",
+			err:      &llm.CounterSupportError{},
+			provider: "",
+			reason:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := error(tt.err)
+			var supportErr *llm.CounterSupportError
+			if !errors.As(err, &supportErr) {
+				t.Fatalf("errors.As(%T) failed for *CounterSupportError", err)
+			}
+			if supportErr.Provider != tt.provider || supportErr.Reason != tt.reason {
+				t.Errorf("CounterSupportError = %+v, want provider %q reason %q", supportErr, tt.provider, tt.reason)
+			}
+			if got := supportErr.Error(); got == "" {
+				t.Error("CounterSupportError.Error() is empty")
+			}
+		})
+	}
+}
+
+func TestCounterDirectConstructionError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		err      *llm.CounterDirectConstructionError
+		provider llm.Provider
+		reason   llm.CounterDirectConstructionReason
+		use      llm.CounterConstructor
+	}{
+		{
+			name: "bedrock directive is inspectable",
+			err: &llm.CounterDirectConstructionError{
+				Provider: llm.ProviderBedrock,
+				Reason:   llm.CounterDirectConstructionNeedsSigV4,
+				Use:      llm.CounterConstructorBedrock,
+			},
+			provider: llm.ProviderBedrock,
+			reason:   llm.CounterDirectConstructionNeedsSigV4,
+			use:      llm.CounterConstructorBedrock,
+		},
+		{
+			name:     "zero value is safe",
+			err:      &llm.CounterDirectConstructionError{},
+			provider: "",
+			reason:   "",
+			use:      "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := error(tt.err)
+			var directErr *llm.CounterDirectConstructionError
+			if !errors.As(err, &directErr) {
+				t.Fatalf("errors.As(%T) failed for *CounterDirectConstructionError", err)
+			}
+			if directErr.Provider != tt.provider || directErr.Reason != tt.reason || directErr.Use != tt.use {
+				t.Errorf("CounterDirectConstructionError = %+v, want provider %q reason %q use %q", directErr, tt.provider, tt.reason, tt.use)
+			}
+			if got := directErr.Error(); got == "" {
+				t.Error("CounterDirectConstructionError.Error() is empty")
+			}
+		})
+	}
+}
