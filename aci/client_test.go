@@ -130,6 +130,8 @@ type gatewayTweaks struct {
 	upstreamResult string
 	// zeroStreamUsage makes the terminal stream usage explicitly present-zero.
 	zeroStreamUsage bool
+	// malformedStreamUsage makes the terminal stream usage fail normalization.
+	malformedStreamUsage bool
 }
 
 // fakeDoer is the fake gateway. It captures the receipt JSON it builds during the
@@ -742,12 +744,18 @@ func (f *fakeDoer) handleStreamInference(cleartextReqBody []byte, clientPub *sec
 		sealedChunk := f.streamChunkJSON(model, d.id, sealedContent)
 		wire.WriteString("data: " + sealedChunk + "\n\n")
 	}
+	terminalChunk := string(mustCompact(f.t, mustParseBody(f.t,
+		`{"id":"terminal-0","object":"chat.completion.chunk","model":"`+model+`","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)))
+	cleartextWire.WriteString("data: " + terminalChunk + "\n\n")
+	wire.WriteString("data: " + terminalChunk + "\n\n")
 	usageJSON := `{"prompt_tokens":11,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2},"completion_tokens_details":{"reasoning_tokens":4}}`
 	if f.tweaks.zeroStreamUsage {
 		usageJSON = `{}`
+	} else if f.tweaks.malformedStreamUsage {
+		usageJSON = `{"prompt_tokens":-1}`
 	}
 	usageChunk := string(mustCompact(f.t, mustParseBody(f.t,
-		`{"id":"usage-0","object":"chat.completion.chunk","model":"`+model+`","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":`+usageJSON+`}`)))
+		`{"id":"usage-0","object":"chat.completion.chunk","model":"`+model+`","choices":[],"usage":`+usageJSON+`}`)))
 	cleartextWire.WriteString("data: " + usageChunk + "\n\n")
 	wire.WriteString("data: " + usageChunk + "\n\n")
 	cleartextWire.WriteString("data: [DONE]\n\n")
@@ -769,10 +777,11 @@ func TestStreamUsageResult(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		tweaks     gatewayTweaks
-		wantReason string
-		wantUsage  content.Usage
+		name         string
+		tweaks       gatewayTweaks
+		wantReason   string
+		wantUsage    content.Usage
+		wantUsageErr bool
 	}{
 		{
 			name: "verified replay exposes normalized usage only after EOF",
@@ -785,6 +794,8 @@ func TestStreamUsageResult(t *testing.T) {
 			},
 		},
 		{name: "present-zero usage survives verified replay", tweaks: gatewayTweaks{zeroStreamUsage: true}, wantUsage: content.Usage{}},
+		{name: "verified malformed usage returns no reader", tweaks: gatewayTweaks{malformedStreamUsage: true}, wantUsageErr: true},
+		{name: "receipt failure precedes malformed usage", tweaks: gatewayTweaks{malformedStreamUsage: true, wrongWireHash: true}, wantReason: reasonReceiptInvalid},
 		{name: "failed verification exposes no reader or usage", tweaks: gatewayTweaks{wrongWireHash: true}, wantReason: reasonReceiptInvalid},
 	}
 
@@ -796,6 +807,13 @@ func TestStreamUsageResult(t *testing.T) {
 			client := newTestClient(t, doer, keys)
 
 			reader, err := client.Stream(context.Background(), testRequest())
+			if tt.wantUsageErr {
+				if reader != nil {
+					t.Fatalf("Stream() reader = %+v, want nil after malformed usage", reader)
+				}
+				assertUsageNormalizationError(t, err, inference.UsageNormalizationFieldInputTokens)
+				return
+			}
 			if tt.wantReason != "" {
 				if reader != nil {
 					t.Fatalf("Stream() reader = %+v, want nil after failed verification", reader)
@@ -824,6 +842,20 @@ func TestStreamUsageResult(t *testing.T) {
 				t.Errorf("Result().FinishReason = %q, want %q", result.FinishReason, inference.FinishReasonStop)
 			}
 		})
+	}
+}
+
+func assertUsageNormalizationError(t *testing.T, err error, field inference.UsageNormalizationField) {
+	t.Helper()
+	var usageErr *inference.UsageNormalizationError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %T (%v), want *inference.UsageNormalizationError", err, err)
+	}
+	if usageErr.Field != field {
+		t.Errorf("UsageNormalizationError.Field = %q, want %q", usageErr.Field, field)
+	}
+	if usageErr.Reason != inference.UsageNormalizationReasonNegative {
+		t.Errorf("UsageNormalizationError.Reason = %q, want %q", usageErr.Reason, inference.UsageNormalizationReasonNegative)
 	}
 }
 

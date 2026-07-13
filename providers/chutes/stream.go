@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
@@ -80,8 +81,9 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 // and closes the upstream response.
 //
 // Goroutine ownership: chatStream spawns exactly ONE reader goroutine (pump).
-// pump owns the HTTP response body and the SSE reader. It exits — and ALWAYS
-// closes the body and the pipe writer exactly once before returning — on any of:
+// The pump and caller-close path share an at-most-once closer for the HTTP body;
+// the pump owns the SSE reader and pipe writer. It exits — and ALWAYS closes the
+// body before returning — on any of:
 //   - e2e_init missing / arriving after an e2e frame (typed error -> pipe),
 //   - a frame that fails to AEAD-open (fail closed, no skip -> pipe),
 //   - an e2e_error event (typed error -> pipe),
@@ -91,7 +93,8 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 //   - the caller Closing the returned stream, which closes the pipe reader: the
 //     next pipe write returns io.ErrClosedPipe, pump stops and closes the body.
 //
-// It never leaks: every return path runs the deferred close of body + pipe.
+// It never leaks: every pump return path runs the deferred body close, while a
+// caller Close eagerly closes both pipe and body to interrupt blocked I/O.
 func (c *Client) chatStream(ctx context.Context, chuteID string, sess *attestedSession, plaintext []byte, respDK *mlkem.DecapsulationKey768) (*inference.StreamReader[content.Chunk], error) {
 	httpResp, err := c.invokeStream(ctx, chuteID, sess, plaintext, respDK)
 	if err != nil {
@@ -102,12 +105,13 @@ func (c *Client) chatStream(ctx context.Context, chuteID string, sess *attestedS
 	// currently blocked on a pipe write.
 	streamCtx, cancel := context.WithCancel(ctx)
 	pr, pw := io.Pipe()
-	go c.pump(streamCtx, httpResp.Body, respDK, pw)
+	body := &onceReadCloser{ReadCloser: httpResp.Body}
+	go c.pump(streamCtx, body, respDK, pw)
 
-	// The returned stream's Close must (a) cancel streamCtx and (b) close the
-	// pipe reader so pump's next write unblocks. openaiapi.NewStream closes the
-	// ReadCloser we hand it via its own closer, so we wrap pr to also cancel.
-	rc := &cancelReadCloser{Reader: pr, closer: pr, cancel: cancel}
+	// The returned stream's Close cancels streamCtx, closes the pipe reader so a
+	// write unblocks, and closes the shared upstream body so a read unblocks.
+	// openaiapi.NewStream invokes this closer through the ReadCloser it owns.
+	rc := &cancelReadCloser{Reader: pr, pipe: pr, upstream: body, cancel: cancel}
 	return openaiapi.NewStream(rc), nil
 }
 
@@ -247,11 +251,25 @@ func deriveStreamKey(respDK *mlkem.DecapsulationKey768, initB64 string) ([]byte,
 // exits and closes the upstream body.
 type cancelReadCloser struct {
 	io.Reader
-	closer io.Closer
-	cancel context.CancelFunc
+	pipe     io.Closer
+	upstream io.Closer
+	cancel   context.CancelFunc
 }
 
 func (c *cancelReadCloser) Close() error {
 	c.cancel()
-	return c.closer.Close()
+	return errors.Join(c.pipe.Close(), c.upstream.Close())
+}
+
+// onceReadCloser gives the pump and caller-close path shared ownership of one
+// upstream response body while closing that body at most once.
+type onceReadCloser struct {
+	io.ReadCloser
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (c *onceReadCloser) Close() error {
+	c.closeOnce.Do(func() { c.closeErr = c.ReadCloser.Close() })
+	return c.closeErr
 }

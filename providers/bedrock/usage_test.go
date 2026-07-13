@@ -2,12 +2,14 @@ package bedrock_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/looprig/core/content"
+	"github.com/looprig/inference"
 	"github.com/looprig/llm/providers/bedrock"
 )
 
@@ -51,6 +53,14 @@ func TestBedrockInvokeUsageResult(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Invoke() error = nil, want malformed-usage error")
+				}
+				var usageErr *inference.UsageNormalizationError
+				if !errors.As(err, &usageErr) {
+					t.Fatalf("Invoke() error = %T (%v), want *inference.UsageNormalizationError", err, err)
+				}
+				if usageErr.Field != inference.UsageNormalizationFieldInputTokens || usageErr.Reason != inference.UsageNormalizationReasonNegative {
+					t.Errorf("UsageNormalizationError = {Field:%q Reason:%q}, want {Field:%q Reason:%q}",
+						usageErr.Field, usageErr.Reason, inference.UsageNormalizationFieldInputTokens, inference.UsageNormalizationReasonNegative)
 				}
 				if resp != nil {
 					t.Fatalf("Invoke() response = %+v, want nil after error", resp)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/looprig/core/content"
+	"github.com/looprig/inference"
 	"github.com/looprig/llm/providers/gemini"
 )
 
@@ -77,6 +78,7 @@ func TestGeminiStreamUsageResult(t *testing.T) {
 					if errors.Is(nextErr, io.EOF) {
 						t.Fatal("Next() error = EOF, want malformed-usage error")
 					}
+					assertGeminiUsageNormalization(t, nextErr)
 					if _, ok := reader.Result(); ok {
 						t.Fatal("Result() after error = present, want unavailable")
 					}
@@ -96,5 +98,17 @@ func TestGeminiStreamUsageResult(t *testing.T) {
 				t.Errorf("Result().Usage = %+v, want %+v", result.Usage, tt.wantUsage)
 			}
 		})
+	}
+}
+
+func assertGeminiUsageNormalization(t *testing.T, err error) {
+	t.Helper()
+	var usageErr *inference.UsageNormalizationError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %T (%v), want *inference.UsageNormalizationError", err, err)
+	}
+	if usageErr.Field != inference.UsageNormalizationFieldInputTokens || usageErr.Reason != inference.UsageNormalizationReasonNegative {
+		t.Errorf("UsageNormalizationError = {Field:%q Reason:%q}, want {Field:%q Reason:%q}",
+			usageErr.Field, usageErr.Reason, inference.UsageNormalizationFieldInputTokens, inference.UsageNormalizationReasonNegative)
 	}
 }
