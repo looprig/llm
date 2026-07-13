@@ -136,13 +136,8 @@ func (c *Counter) validateConfiguration() error {
 }
 
 func (c *Counter) preflight(req inference.Request) ([]byte, error) {
-	if llm.Provider(req.Model.Provider) != llm.ProviderBedrock {
-		return nil, &inference.ModelMismatchError{
-			BoundProvider:   inference.ProviderName(llm.ProviderBedrock),
-			RequestProvider: req.Model.Provider,
-			BoundEndpoint:   c.endpoint,
-			RequestEndpoint: req.Model.BaseURL,
-		}
+	if err := c.checkBinding(req.Model); err != nil {
+		return nil, err
 	}
 	if err := llm.ValidateModel(req.Model); err != nil {
 		return nil, err
@@ -173,6 +168,18 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 		return nil, &CounterRequestError{Err: err}
 	}
 	return body, nil
+}
+
+func (c *Counter) checkBinding(model inference.Model) error {
+	if llm.Provider(model.Provider) == llm.ProviderBedrock && model.BaseURL == "" {
+		return nil
+	}
+	return &inference.ModelMismatchError{
+		BoundProvider:   inference.ProviderName(llm.ProviderBedrock),
+		RequestProvider: model.Provider,
+		BoundEndpoint:   c.endpoint,
+		RequestEndpoint: model.BaseURL,
+	}
 }
 
 func validBedrockModelID(modelID string) bool {

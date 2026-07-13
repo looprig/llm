@@ -196,6 +196,59 @@ func TestCounterPreflightRejectsBeforeIO(t *testing.T) {
 	}
 }
 
+func TestCounterEndpointBinding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		requestEndpoint func(string) string
+	}{
+		{name: "equal-looking bound endpoint is still forbidden", requestEndpoint: func(bound string) string { return bound }},
+		{name: "different endpoint is forbidden", requestEndpoint: func(string) string { return "https://bedrock-runtime.us-west-2.amazonaws.com" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			counter := newCounter(counterTestCreds(), "us-east-1", defaultEndpoint("us-east-1"))
+			var signCalls atomic.Int64
+			var doCalls atomic.Int64
+			counter.signer = authenticatorFunc(func(context.Context, *http.Request) error {
+				signCalls.Add(1)
+				return nil
+			})
+			counter.hc = doerFunc(func(*http.Request) (*http.Response, error) {
+				doCalls.Add(1)
+				return nil, errors.New("unexpected CountTokens I/O")
+			})
+
+			req := counterRequest(counterModelID)
+			req.Model.BaseURL = tt.requestEndpoint(counter.endpoint)
+			// Audio is intentionally unsupported by the Anthropic encoder. Receiving
+			// ModelMismatchError proves endpoint binding runs before body encoding.
+			req.Messages[0].(*content.UserMessage).Blocks = []content.Block{
+				&content.AudioBlock{MediaType: content.MediaType("audio/wav"), Data: []byte("not encoded")},
+			}
+			_, err := counter.CountContext(context.Background(), req)
+			var mismatch *inference.ModelMismatchError
+			if !errors.As(err, &mismatch) {
+				t.Fatalf("CountContext() error = %T, want *inference.ModelMismatchError before encoding", err)
+			}
+			if mismatch.BoundEndpoint != counter.endpoint {
+				t.Errorf("BoundEndpoint = %q, want %q", mismatch.BoundEndpoint, counter.endpoint)
+			}
+			if mismatch.RequestEndpoint != req.Model.BaseURL {
+				t.Errorf("RequestEndpoint = %q, want %q", mismatch.RequestEndpoint, req.Model.BaseURL)
+			}
+			if signCalls.Load() != 0 {
+				t.Errorf("Authorize calls = %d, want zero", signCalls.Load())
+			}
+			if doCalls.Load() != 0 {
+				t.Errorf("HTTP Do calls = %d, want zero", doCalls.Load())
+			}
+		})
+	}
+}
+
 func TestCounterResponseCounts(t *testing.T) {
 	t.Parallel()
 
@@ -628,6 +681,12 @@ func FuzzCounterEndpoint(f *testing.F) {
 type doerFunc func(*http.Request) (*http.Response, error)
 
 func (f doerFunc) Do(req *http.Request) (*http.Response, error) { return f(req) }
+
+type authenticatorFunc func(context.Context, *http.Request) error
+
+func (f authenticatorFunc) Authorize(ctx context.Context, req *http.Request) error {
+	return f(ctx, req)
+}
 
 type errorReadCloser struct{ err error }
 
