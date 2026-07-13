@@ -221,6 +221,53 @@ func TestGeminiInvokeErrors(t *testing.T) {
 	}
 }
 
+// TestGeminiAPIErrorBodyBound locks the shared provider error-body policy used
+// by Invoke, Stream, and the separately constructed context counter. A hostile
+// endpoint cannot force an unbounded allocation, while callers still receive a
+// typed APIError with the retained prefix.
+func TestGeminiAPIErrorBodyBound(t *testing.T) {
+	t.Parallel()
+
+	const wantLimit = 1 << 20
+	providerBody := strings.Repeat("x", wantLimit+128)
+	tests := []struct {
+		name string
+		call func(*gemini.Client) error
+	}{
+		{name: "invoke", call: func(client *gemini.Client) error {
+			_, err := client.Invoke(context.Background(), geminiRequest("gemini-2.5-flash"))
+			return err
+		}},
+		{name: "stream", call: func(client *gemini.Client) error {
+			_, err := client.Stream(context.Background(), geminiRequest("gemini-2.5-flash"))
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = io.WriteString(w, providerBody)
+			}))
+			defer srv.Close()
+
+			err := tt.call(gemini.NewWithEndpoint(testKey, srv.URL))
+			var apiErr *inference.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %T, want *inference.APIError", err)
+			}
+			if len(apiErr.Body) != wantLimit {
+				t.Errorf("APIError.Body length = %d, want bounded %d", len(apiErr.Body), wantLimit)
+			}
+			if apiErr.Message != string(apiErr.Body) {
+				t.Errorf("APIError.Message length = %d, want retained body prefix length %d", len(apiErr.Message), len(apiErr.Body))
+			}
+		})
+	}
+}
+
 // TestGeminiStream covers the happy Stream path against an SSE server: the request
 // is POSTed to /models/<id>:streamGenerateContent?alt=sse with an SSE Accept header,
 // and the streamed events decode, in order, into TextChunks.

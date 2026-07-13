@@ -43,11 +43,16 @@ const (
 	pathModelsPrefix            = "/models/"
 	methodGenerateContent       = "generateContent"
 	methodStreamGenerateContent = "streamGenerateContent"
+	methodCountTokens           = "countTokens"
 	// sseQuery selects server-sent-events framing for the streaming endpoint.
 	sseQuery = "alt=sse"
 
 	contentTypeJSON = "application/json"
 	acceptSSE       = "text/event-stream"
+
+	// maxAPIErrorBodyBytes bounds provider-controlled diagnostic payloads while
+	// retaining a useful prefix in inference.APIError.
+	maxAPIErrorBodyBytes = 1 << 20
 )
 
 // Timeout budget for the connect/TLS/header phases, mirroring the generic
@@ -92,20 +97,26 @@ func newClient(key auth.APIKey, endpoint string) *Client {
 	return &Client{
 		endpoint: endpoint,
 		auth:     auth.Header(key, apiKeyHeader),
-		hc: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				DialContext: (&net.Dialer{
-					Timeout:   dialTimeout,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-				TLSHandshakeTimeout:   tlsHandshakeTimeout,
-				ResponseHeaderTimeout: responseHeaderTimeout,
-				ExpectContinueTimeout: expectContinueTimeout,
-				IdleConnTimeout:       idleConnTimeout,
-				ForceAttemptHTTP2:     true,
-			},
+		hc:       newHTTPClient(),
+	}
+}
+
+// newHTTPClient constructs the immutable phase-bounded transport shared by the
+// inference client and the separately constructed countTokens counter.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   dialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout:   tlsHandshakeTimeout,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			ExpectContinueTimeout: expectContinueTimeout,
+			IdleConnTimeout:       idleConnTimeout,
+			ForceAttemptHTTP2:     true,
 		},
 	}
 }
@@ -133,12 +144,12 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 		return nil, &inference.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
+	if httpResp.StatusCode/100 != 2 {
+		return nil, providerAPIError(httpResp)
+	}
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, &inference.NetworkError{Err: err}
-	}
-	if httpResp.StatusCode/100 != 2 {
-		return nil, &inference.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
 	}
 	return c.codec.DecodeResponse(respBody)
 }
@@ -171,8 +182,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 	}
 	if httpResp.StatusCode/100 != 2 {
 		defer httpResp.Body.Close()
-		respBody, _ := io.ReadAll(httpResp.Body)
-		return nil, &inference.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+		return nil, providerAPIError(httpResp)
 	}
 	// DecodeStream owns httpResp.Body on success (closed via the reader's Close). On
 	// the (practically unreachable) framer error it closes the body itself; close here
@@ -226,7 +236,11 @@ func (c *Client) checkBinding(m inference.Model) error {
 // valid non-first path-segment character, so it stays literal on the wire). Caller
 // sets Accept (application/json for invoke, text/event-stream for stream).
 func (c *Client) buildRequest(ctx context.Context, modelName, method, query string, body []byte) (*http.Request, error) {
-	rawURL := c.endpoint + pathModelsPrefix + url.PathEscape(modelName) + ":" + method
+	return buildRequest(ctx, c.endpoint, modelName, method, query, body)
+}
+
+func buildRequest(ctx context.Context, endpoint, modelName, method, query string, body []byte) (*http.Request, error) {
+	rawURL := endpoint + pathModelsPrefix + url.PathEscape(modelName) + ":" + method
 	if query != "" {
 		rawURL += "?" + query
 	}
@@ -236,4 +250,14 @@ func (c *Client) buildRequest(ctx context.Context, modelName, method, query stri
 	}
 	httpReq.Header.Set("Content-Type", contentTypeJSON)
 	return httpReq, nil
+}
+
+// providerAPIError returns the shared bounded non-2xx representation. A body
+// read failure remains a transport failure rather than a partial API error.
+func providerAPIError(response *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxAPIErrorBodyBytes))
+	if err != nil {
+		return &inference.NetworkError{Err: err}
+	}
+	return &inference.APIError{Status: response.StatusCode, Message: string(body), Body: body}
 }
