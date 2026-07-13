@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -400,19 +401,24 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 	if err := VerifyReceipt(receiptJSON, verified, expect); err != nil {
 		return nil, err
 	}
+	result, hasResult, err := collectStreamResult(wireBytes)
+	if err != nil {
+		return nil, err
+	}
 
 	// 7. ONLY NOW — every check passed — hand back a reader replaying the verified
 	//    deltas. Nothing produced this reader before verification, so a failure
 	//    above yields no reader and zero observable chunks.
-	return newReplayReader(chunks), nil
+	return newReplayReader(chunks, result, hasResult), nil
 }
 
-// newReplayReader builds a *inference.StreamReader that replays a pre-built, already-
-// verified chunk slice: Next returns each chunk in order and (nil, io.EOF) once
-// exhausted; Close is a no-op (the wire response was fully buffered and closed
-// during Stream, so there is no underlying connection to release). The cursor is
-// closed over locally, so a fresh reader is independent.
-func newReplayReader(chunks []content.Chunk) *inference.StreamReader[content.Chunk] {
+// newReplayReader builds a *inference.StreamReader that replays pre-built,
+// already-verified chunks and publishes their codec result at EOF. Next returns
+// each chunk in order and (nil, io.EOF) once exhausted; Close is a no-op (the wire
+// response was fully buffered and closed during Stream, so there is no underlying
+// connection to release). The cursor is closed over locally, so a fresh reader is
+// independent.
+func newReplayReader(chunks []content.Chunk, result inference.StreamResult, hasResult bool) *inference.StreamReader[content.Chunk] {
 	i := 0
 	next := func() (content.Chunk, error) {
 		if i >= len(chunks) {
@@ -422,7 +428,10 @@ func newReplayReader(chunks []content.Chunk) *inference.StreamReader[content.Chu
 		i++
 		return chunk, nil
 	}
-	return inference.NewStreamReader[content.Chunk](next, nil)
+	produceResult := func() (inference.StreamResult, bool, error) {
+		return result, hasResult, nil
+	}
+	return inference.NewStreamReaderWithResult(next, nil, produceResult)
 }
 
 // bodyKeyDelta is the streaming chunk's per-choice sealed-field container: the
@@ -477,6 +486,32 @@ func openStreamDeltas(wireBytes []byte, clientPriv *secp256k1.PrivateKey, model,
 		}
 		chunks = append(chunks, eventChunks...)
 	}
+}
+
+// collectStreamResult delegates terminal metadata decoding to the same OpenAI
+// codec used by ordinary provider streams. The wire bytes remain internal until
+// the receipt has been verified; only then does Stream attach this snapshot to
+// the verified replay reader.
+func collectStreamResult(wireBytes []byte) (inference.StreamResult, bool, error) {
+	reader := openaiapi.NewStream(io.NopCloser(bytes.NewReader(wireBytes)))
+	for {
+		_, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			closeErr := reader.Close()
+			if closeErr != nil {
+				return inference.StreamResult{}, false, &streamParseError{reason: "usage stream decode and close failed", cause: errors.Join(err, closeErr)}
+			}
+			return inference.StreamResult{}, false, err
+		}
+	}
+	result, ok := reader.Result()
+	if err := reader.Close(); err != nil {
+		return inference.StreamResult{}, false, &streamParseError{reason: "usage stream close failed", cause: err}
+	}
+	return result, ok, nil
 }
 
 // openStreamEvent opens one SSE chunk event: it order-preservingly parses the

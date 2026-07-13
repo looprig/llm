@@ -128,6 +128,8 @@ type gatewayTweaks struct {
 	signWithWrongKey bool
 	// upstreamResult overrides the upstream.verified result ("" => "verified").
 	upstreamResult string
+	// zeroStreamUsage makes the terminal stream usage explicitly present-zero.
+	zeroStreamUsage bool
 }
 
 // fakeDoer is the fake gateway. It captures the receipt JSON it builds during the
@@ -740,6 +742,14 @@ func (f *fakeDoer) handleStreamInference(cleartextReqBody []byte, clientPub *sec
 		sealedChunk := f.streamChunkJSON(model, d.id, sealedContent)
 		wire.WriteString("data: " + sealedChunk + "\n\n")
 	}
+	usageJSON := `{"prompt_tokens":11,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2},"completion_tokens_details":{"reasoning_tokens":4}}`
+	if f.tweaks.zeroStreamUsage {
+		usageJSON = `{}`
+	}
+	usageChunk := string(mustCompact(f.t, mustParseBody(f.t,
+		`{"id":"usage-0","object":"chat.completion.chunk","model":"`+model+`","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":`+usageJSON+`}`)))
+	cleartextWire.WriteString("data: " + usageChunk + "\n\n")
+	wire.WriteString("data: " + usageChunk + "\n\n")
 	cleartextWire.WriteString("data: [DONE]\n\n")
 	wire.WriteString("data: [DONE]\n\n")
 
@@ -753,6 +763,68 @@ func (f *fakeDoer) handleStreamInference(cleartextReqBody []byte, clientPub *sec
 		return f.response(f.tweaks.status, []byte(`{"error":"upstream rejected"}`), ""), nil
 	}
 	return f.streamResponse(http.StatusOK, wireBytes, testReceiptID), nil
+}
+
+func TestStreamUsageResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		tweaks     gatewayTweaks
+		wantReason string
+		wantUsage  content.Usage
+	}{
+		{
+			name: "verified replay exposes normalized usage only after EOF",
+			wantUsage: content.Usage{
+				InputTokens:         6,
+				OutputTokens:        7,
+				CacheReadTokens:     3,
+				CacheCreationTokens: 2,
+				ReasoningTokens:     4,
+			},
+		},
+		{name: "present-zero usage survives verified replay", tweaks: gatewayTweaks{zeroStreamUsage: true}, wantUsage: content.Usage{}},
+		{name: "failed verification exposes no reader or usage", tweaks: gatewayTweaks{wrongWireHash: true}, wantReason: reasonReceiptInvalid},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			keys := newGatewayKeys(t)
+			doer := &fakeDoer{t: t, keys: keys, tweaks: tt.tweaks, stream: true}
+			client := newTestClient(t, doer, keys)
+
+			reader, err := client.Stream(context.Background(), testRequest())
+			if tt.wantReason != "" {
+				if reader != nil {
+					t.Fatalf("Stream() reader = %+v, want nil after failed verification", reader)
+				}
+				asAttestReason(t, err, tt.wantReason)
+				return
+			}
+			if err != nil {
+				t.Fatalf("Stream() error = %v, want nil", err)
+			}
+			if _, ok := reader.Result(); ok {
+				t.Fatal("Result() before EOF = present, want unavailable")
+			}
+			_ = drainStream(t, reader)
+			result, ok := reader.Result()
+			if !ok {
+				t.Fatal("Result() after verified EOF = unavailable, want normalized usage")
+			}
+			if result.Usage == nil || *result.Usage != tt.wantUsage {
+				t.Errorf("Result().Usage = %+v, want %+v", result.Usage, tt.wantUsage)
+			}
+			if result.Model != testClientModel {
+				t.Errorf("Result().Model = %q, want %q", result.Model, testClientModel)
+			}
+			if result.FinishReason != inference.FinishReasonStop {
+				t.Errorf("Result().FinishReason = %q, want %q", result.FinishReason, inference.FinishReasonStop)
+			}
+		})
+	}
 }
 
 // streamChunkJSON renders one chat.completion.chunk with a single choice whose
