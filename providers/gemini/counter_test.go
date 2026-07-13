@@ -365,6 +365,11 @@ func TestCounterRejectsDuplicateCount(t *testing.T) {
 		{name: "different values", response: `{"totalTokens":1,"totalTokens":2}`},
 		{name: "duplicate around another field", response: `{"totalTokens":1,"ignored":true,"totalTokens":2}`},
 		{name: "reverse field order", response: `{"ignored":true,"totalTokens":1,"totalTokens":1}`},
+		{name: "mixed case after canonical", response: `{"totalTokens":1,"TOTALTOKENS":2}`},
+		{name: "mixed case before canonical", response: `{"TotalTokens":1,"totalTokens":2}`},
+		{name: "multiple casing variants", response: `{"totaltokens":1,"tOtAlToKeNs":2,"TOTALTOKENS":3}`},
+		{name: "escaped canonical spelling", response: `{"totalTokens":1,"total\u0054okens":2}`},
+		{name: "escaped mixed case spelling", response: `{"TOTAL\u0054OKENS":1,"totalTokens":2}`},
 	}
 
 	for _, tt := range tests {
@@ -847,6 +852,9 @@ func FuzzCounterResponse(f *testing.F) {
 		`{"totalTokens":1.5}`, `{"totalTokens":9223372036854775808}`, `{"totalTokens":"value"}`,
 		`{"totalTokens":1,"totalTokens":1}`, `{"totalTokens":1,"totalTokens":2}`,
 		`{"ignored":true,"totalTokens":1,"totalTokens":1}`,
+		`{"totalTokens":1,"TOTALTOKENS":2}`, `{"TotalTokens":1,"totalTokens":2}`,
+		`{"totaltokens":1,"tOtAlToKeNs":2,"TOTALTOKENS":3}`,
+		`{"totalTokens":1,"total\u0054okens":2}`, `{"TOTAL\u0054OKENS":1,"totalTokens":2}`,
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
@@ -1036,7 +1044,7 @@ func hasDuplicateTotalTokens(body []byte) bool {
 		if decodeErr := decoder.Decode(&value); decodeErr != nil {
 			return false
 		}
-		if name == string(CounterResponseFieldTotalTokens) {
+		if strings.EqualFold(name, string(CounterResponseFieldTotalTokens)) {
 			count++
 		}
 	}

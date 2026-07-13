@@ -290,7 +290,7 @@ func rejectDuplicateCountFields(decoder *json.Decoder) error {
 		if decodeErr := decoder.Decode(&value); decodeErr != nil {
 			return nil
 		}
-		if name != string(CounterResponseFieldTotalTokens) {
+		if !strings.EqualFold(name, string(CounterResponseFieldTotalTokens)) {
 			continue
 		}
 		if seen {
