@@ -190,6 +190,109 @@ func TestNewCounterOrderedErrors(t *testing.T) {
 	}
 }
 
+func TestResolveCounterDialects(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		provider       llm.Provider
+		apiFormat      inference.APIFormat
+		key            auth.APIKey
+		wantGoogle     bool
+		wantDirect     bool
+		wantSupport    bool
+		wantValidation bool
+		supportReason  llm.CounterSupportReason
+	}{
+		{
+			name:       "google gemini constructs exact counter",
+			provider:   llm.ProviderGoogle,
+			apiFormat:  inference.APIFormatGemini,
+			key:        "google-test-key",
+			wantGoogle: true,
+		},
+		{
+			name:          "future google dialect fails closed",
+			provider:      llm.ProviderGoogle,
+			apiFormat:     inference.APIFormat("future-google-dialect"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportAPIFormatUnavailable,
+		},
+		{
+			name:       "bedrock anthropic directs construction",
+			provider:   llm.ProviderBedrock,
+			apiFormat:  inference.APIFormatAnthropic,
+			wantDirect: true,
+		},
+		{
+			name:          "bedrock converse is unsupported",
+			provider:      llm.ProviderBedrock,
+			apiFormat:     llm.APIFormatBedrockConverse,
+			wantSupport:   true,
+			supportReason: llm.CounterSupportAPIFormatUnavailable,
+		},
+		{
+			name:           "unknown provider fails closed",
+			provider:       llm.Provider("future-provider"),
+			apiFormat:      inference.APIFormat("future-dialect"),
+			wantValidation: true,
+		},
+		{
+			name:          "future bedrock dialect fails closed",
+			provider:      llm.ProviderBedrock,
+			apiFormat:     inference.APIFormat("future-bedrock-dialect"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportAPIFormatUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveCounter(tt.provider, tt.apiFormat, tt.key)
+			if tt.wantGoogle {
+				if err != nil {
+					t.Fatalf("resolveCounter() error = %v", err)
+				}
+				if _, ok := got.(*geminiprovider.Counter); !ok {
+					t.Fatalf("resolveCounter() = %T, want *gemini.Counter", got)
+				}
+				return
+			}
+			if got != nil {
+				t.Fatalf("resolveCounter() = %T alongside error, want nil", got)
+			}
+			if tt.wantValidation {
+				var validationErr *inference.ValidationError
+				if !errors.As(err, &validationErr) {
+					t.Fatalf("resolveCounter() error = %T, want *inference.ValidationError", err)
+				}
+				if validationErr.Field != "Provider" {
+					t.Errorf("ValidationError.Field = %q, want Provider", validationErr.Field)
+				}
+				return
+			}
+			if tt.wantDirect {
+				var directErr *llm.CounterDirectConstructionError
+				if !errors.As(err, &directErr) {
+					t.Fatalf("resolveCounter() error = %T, want *llm.CounterDirectConstructionError", err)
+				}
+				if directErr.Provider != tt.provider || directErr.Reason != llm.CounterDirectConstructionNeedsSigV4 || directErr.Use != llm.CounterConstructorBedrock {
+					t.Errorf("CounterDirectConstructionError = %+v", directErr)
+				}
+				return
+			}
+			if tt.wantSupport {
+				var supportErr *llm.CounterSupportError
+				if !errors.As(err, &supportErr) {
+					t.Fatalf("resolveCounter() error = %T, want *llm.CounterSupportError", err)
+				}
+				if supportErr.Provider != tt.provider || supportErr.Reason != tt.supportReason || supportErr.APIFormat != tt.apiFormat {
+					t.Errorf("CounterSupportError = %+v, want provider %q reason %q API format %q", supportErr, tt.provider, tt.supportReason, tt.apiFormat)
+				}
+			}
+		})
+	}
+}
+
 func counterModel(provider llm.Provider, format inference.APIFormat, baseURL string) inference.Model {
 	return inference.CustomModel(inference.ProviderName(provider), format, baseURL, "counter-test-model")
 }

@@ -21,33 +21,41 @@ func NewCounter(model inference.Model, key auth.APIKey) (inference.ContextCounte
 	if err := llm.ValidateModel(model); err != nil {
 		return nil, err
 	}
+	return resolveCounter(llm.Provider(model.Provider), model.APIFormat, key)
+}
 
-	provider := llm.Provider(model.Provider)
+// resolveCounter classifies an already validated provider/dialect pair. Keeping
+// dialect dispatch explicit here makes registry expansion fail closed even before
+// ValidateModel is updated to admit a new provider format.
+func resolveCounter(provider llm.Provider, apiFormat inference.APIFormat, key auth.APIKey) (inference.ContextCounter, error) {
 	switch provider {
 	case llm.ProviderGoogle:
+		if apiFormat != inference.APIFormatGemini {
+			return nil, &llm.CounterSupportError{
+				Provider:  provider,
+				Reason:    llm.CounterSupportAPIFormatUnavailable,
+				APIFormat: apiFormat,
+			}
+		}
 		return geminiprovider.NewCounter(key)
 	case llm.ProviderBedrock:
-		switch model.APIFormat {
-		case inference.APIFormatAnthropic:
+		if apiFormat == inference.APIFormatAnthropic {
 			return nil, &llm.CounterDirectConstructionError{
 				Provider: provider,
 				Reason:   llm.CounterDirectConstructionNeedsSigV4,
 				Use:      llm.CounterConstructorBedrock,
 			}
-		case llm.APIFormatBedrockConverse:
-			return nil, &llm.CounterSupportError{
-				Provider:  provider,
-				Reason:    llm.CounterSupportAPIFormatUnavailable,
-				APIFormat: model.APIFormat,
-			}
-		default:
-			return nil, &inference.ValidationError{Field: "APIFormat", Reason: "context counter support is unclassified"}
+		}
+		return nil, &llm.CounterSupportError{
+			Provider:  provider,
+			Reason:    llm.CounterSupportAPIFormatUnavailable,
+			APIFormat: apiFormat,
 		}
 	case llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio:
 		return nil, &llm.CounterSupportError{
 			Provider:  provider,
 			Reason:    llm.CounterSupportExactUnavailable,
-			APIFormat: model.APIFormat,
+			APIFormat: apiFormat,
 		}
 	default:
 		// ValidateModel rejects every provider not in llm's canonical registry.
