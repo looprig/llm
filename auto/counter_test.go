@@ -13,14 +13,36 @@ import (
 func TestNewCounterProviderMatrix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		provider    llm.Provider
-		model       inference.Model
-		key         auth.APIKey
-		wantGoogle  bool
-		wantDirect  bool
-		wantSupport bool
+		name          string
+		provider      llm.Provider
+		model         inference.Model
+		key           auth.APIKey
+		wantGoogle    bool
+		wantDirect    bool
+		wantSupport   bool
+		supportReason llm.CounterSupportReason
 	}{
+		{
+			name:          "phala openai has no exact counter",
+			provider:      llm.ProviderPhala,
+			model:         counterModel(llm.ProviderPhala, inference.APIFormatOpenAI, "https://api.phala.network/v1"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportExactUnavailable,
+		},
+		{
+			name:          "chutes openai has no exact counter",
+			provider:      llm.ProviderChutes,
+			model:         counterModel(llm.ProviderChutes, inference.APIFormatOpenAI, "https://api.chutes.ai"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportExactUnavailable,
+		},
+		{
+			name:          "openrouter openai has no exact counter",
+			provider:      llm.ProviderOpenRouter,
+			model:         counterModel(llm.ProviderOpenRouter, inference.APIFormatOpenAI, "https://openrouter.ai/api/v1"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportExactUnavailable,
+		},
 		{
 			name:       "google exact counter",
 			provider:   llm.ProviderGoogle,
@@ -35,28 +57,25 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 			wantDirect: true,
 		},
 		{
-			name:        "chutes has no exact counter",
-			provider:    llm.ProviderChutes,
-			model:       counterModel(llm.ProviderChutes, inference.APIFormatOpenAI, "https://api.chutes.ai"),
-			wantSupport: true,
+			name:          "bedrock converse has no exact counter for dialect",
+			provider:      llm.ProviderBedrock,
+			model:         counterModel(llm.ProviderBedrock, llm.APIFormatBedrockConverse, ""),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportAPIFormatUnavailable,
 		},
 		{
-			name:        "phala has no exact counter",
-			provider:    llm.ProviderPhala,
-			model:       counterModel(llm.ProviderPhala, inference.APIFormatOpenAI, "https://api.phala.network/v1"),
-			wantSupport: true,
+			name:          "lmstudio openai has no provider exact counter",
+			provider:      llm.ProviderLMStudio,
+			model:         counterModel(llm.ProviderLMStudio, inference.APIFormatOpenAI, "http://localhost:1234/v1"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportExactUnavailable,
 		},
 		{
-			name:        "openrouter has no exact counter",
-			provider:    llm.ProviderOpenRouter,
-			model:       counterModel(llm.ProviderOpenRouter, inference.APIFormatOpenAI, "https://openrouter.ai/api/v1"),
-			wantSupport: true,
-		},
-		{
-			name:        "lmstudio has no provider exact counter",
-			provider:    llm.ProviderLMStudio,
-			model:       counterModel(llm.ProviderLMStudio, inference.APIFormatOpenAI, "http://localhost:1234/v1"),
-			wantSupport: true,
+			name:          "lmstudio anthropic has no provider exact counter",
+			provider:      llm.ProviderLMStudio,
+			model:         counterModel(llm.ProviderLMStudio, inference.APIFormatAnthropic, "http://localhost:1234/v1"),
+			wantSupport:   true,
+			supportReason: llm.CounterSupportExactUnavailable,
 		},
 	}
 	for _, tt := range tests {
@@ -94,8 +113,8 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 				if !errors.As(err, &supportErr) {
 					t.Fatalf("NewCounter() error = %T, want *llm.CounterSupportError", err)
 				}
-				if supportErr.Provider != tt.provider || supportErr.Reason != llm.CounterSupportExactUnavailable {
-					t.Errorf("CounterSupportError = %+v", supportErr)
+				if supportErr.Provider != tt.provider || supportErr.Reason != tt.supportReason || supportErr.APIFormat != tt.model.APIFormat {
+					t.Errorf("CounterSupportError = %+v, want provider %q reason %q API format %q", supportErr, tt.provider, tt.supportReason, tt.model.APIFormat)
 				}
 			}
 		})
@@ -163,6 +182,9 @@ func TestNewCounterOrderedErrors(t *testing.T) {
 			var directErr *llm.CounterDirectConstructionError
 			if errors.As(err, &validationErr) != tt.wantValidation || errors.As(err, &authErr) != tt.wantAuth || errors.As(err, &supportErr) != tt.wantSupport || errors.As(err, &directErr) != tt.wantDirect {
 				t.Errorf("NewCounter() error = %T; validation=%v auth=%v support=%v direct=%v", err, errors.As(err, &validationErr), errors.As(err, &authErr), errors.As(err, &supportErr), errors.As(err, &directErr))
+			}
+			if tt.wantAuth && (authErr.Provider != llm.ProviderGoogle || authErr.Kind != inference.AuthAPIKey) {
+				t.Errorf("AuthRequiredError = %+v, want google API-key requirement", authErr)
 			}
 		})
 	}

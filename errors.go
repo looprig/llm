@@ -53,17 +53,22 @@ const (
 	// that llm can construct. Consumers may explicitly inject a local estimator;
 	// this error never substitutes one.
 	CounterSupportExactUnavailable CounterSupportReason = "exact provider context counter unavailable"
+	// CounterSupportAPIFormatUnavailable means the provider has an exact counter,
+	// but it cannot encode the model's validated API dialect.
+	CounterSupportAPIFormatUnavailable CounterSupportReason = "exact provider context counter unavailable for API format"
 )
 
 // CounterSupportError reports that a known provider has no exact context counter
-// in llm. Provider and Reason are secret-free and inspectable with errors.As.
+// in llm for the selected dialect. All fields are secret-free and inspectable
+// with errors.As.
 type CounterSupportError struct {
-	Provider Provider
-	Reason   CounterSupportReason
+	Provider  Provider
+	Reason    CounterSupportReason
+	APIFormat inference.APIFormat
 }
 
 func (e *CounterSupportError) Error() string {
-	return fmt.Sprintf("provider %q context counter support: %s", e.Provider, e.Reason)
+	return fmt.Sprintf("provider %q context counter support for API format %q: %s", e.Provider, e.APIFormat, e.Reason)
 }
 
 // CounterDirectConstructionReason classifies why auto.NewCounter cannot build an

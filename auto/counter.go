@@ -27,15 +27,27 @@ func NewCounter(model inference.Model, key auth.APIKey) (inference.ContextCounte
 	case llm.ProviderGoogle:
 		return geminiprovider.NewCounter(key)
 	case llm.ProviderBedrock:
-		return nil, &llm.CounterDirectConstructionError{
-			Provider: provider,
-			Reason:   llm.CounterDirectConstructionNeedsSigV4,
-			Use:      llm.CounterConstructorBedrock,
+		switch model.APIFormat {
+		case inference.APIFormatAnthropic:
+			return nil, &llm.CounterDirectConstructionError{
+				Provider: provider,
+				Reason:   llm.CounterDirectConstructionNeedsSigV4,
+				Use:      llm.CounterConstructorBedrock,
+			}
+		case llm.APIFormatBedrockConverse:
+			return nil, &llm.CounterSupportError{
+				Provider:  provider,
+				Reason:    llm.CounterSupportAPIFormatUnavailable,
+				APIFormat: model.APIFormat,
+			}
+		default:
+			return nil, &inference.ValidationError{Field: "APIFormat", Reason: "context counter support is unclassified"}
 		}
 	case llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio:
 		return nil, &llm.CounterSupportError{
-			Provider: provider,
-			Reason:   llm.CounterSupportExactUnavailable,
+			Provider:  provider,
+			Reason:    llm.CounterSupportExactUnavailable,
+			APIFormat: model.APIFormat,
 		}
 	default:
 		// ValidateModel rejects every provider not in llm's canonical registry.

@@ -67,22 +67,25 @@ func TestAuthSigV4Kind(t *testing.T) {
 func TestCounterSupportError(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		err      *llm.CounterSupportError
-		provider llm.Provider
-		reason   llm.CounterSupportReason
+		name      string
+		err       *llm.CounterSupportError
+		provider  llm.Provider
+		reason    llm.CounterSupportReason
+		apiFormat inference.APIFormat
 	}{
 		{
-			name:     "unsupported gateway is inspectable",
-			err:      &llm.CounterSupportError{Provider: llm.ProviderOpenRouter, Reason: llm.CounterSupportExactUnavailable},
-			provider: llm.ProviderOpenRouter,
-			reason:   llm.CounterSupportExactUnavailable,
+			name:      "unsupported gateway dialect is inspectable",
+			err:       &llm.CounterSupportError{Provider: llm.ProviderOpenRouter, Reason: llm.CounterSupportExactUnavailable, APIFormat: inference.APIFormatOpenAI},
+			provider:  llm.ProviderOpenRouter,
+			reason:    llm.CounterSupportExactUnavailable,
+			apiFormat: inference.APIFormatOpenAI,
 		},
 		{
-			name:     "zero value is safe",
-			err:      &llm.CounterSupportError{},
-			provider: "",
-			reason:   "",
+			name:      "zero value is safe",
+			err:       &llm.CounterSupportError{},
+			provider:  "",
+			reason:    "",
+			apiFormat: "",
 		},
 	}
 	for _, tt := range tests {
@@ -93,11 +96,13 @@ func TestCounterSupportError(t *testing.T) {
 			if !errors.As(err, &supportErr) {
 				t.Fatalf("errors.As(%T) failed for *CounterSupportError", err)
 			}
-			if supportErr.Provider != tt.provider || supportErr.Reason != tt.reason {
-				t.Errorf("CounterSupportError = %+v, want provider %q reason %q", supportErr, tt.provider, tt.reason)
+			if supportErr.Provider != tt.provider || supportErr.Reason != tt.reason || supportErr.APIFormat != tt.apiFormat {
+				t.Errorf("CounterSupportError = %+v, want provider %q reason %q API format %q", supportErr, tt.provider, tt.reason, tt.apiFormat)
 			}
 			if got := supportErr.Error(); got == "" {
 				t.Error("CounterSupportError.Error() is empty")
+			} else if tt.apiFormat != "" && !strings.Contains(got, string(tt.apiFormat)) {
+				t.Errorf("CounterSupportError.Error() = %q, want API format %q", got, tt.apiFormat)
 			}
 		})
 	}
