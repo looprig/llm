@@ -26,6 +26,7 @@ const (
 	bedrockSecurityPolicyRevision                             = "aws-bedrock-runtime-sigv4-tls-v1"
 	maxCountResponseBodyBytes                                 = 64 << 10
 	maxBedrockModelIDBytes                                    = 256
+	maxInvokeModelTokensBodyBytes int                         = 25_000_000
 	defaultCounterTimeout                                     = 60 * time.Second
 )
 
@@ -159,13 +160,20 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return buildCountRequestEnvelope(invokeBody)
+}
+
+func buildCountRequestEnvelope(invokeBody []byte) ([]byte, error) {
+	if len(invokeBody) > maxInvokeModelTokensBodyBytes {
+		return nil, &CounterRequestError{Reason: CounterRequestBodyTooLarge}
+	}
 	body, err := json.Marshal(countTokensRequest{
 		Input: countTokensInput{
 			InvokeModel: invokeModelTokensRequest{Body: invokeBody},
 		},
 	})
 	if err != nil {
-		return nil, &CounterRequestError{Err: err}
+		return nil, &CounterRequestError{Reason: CounterRequestEnvelopeEncoding, Err: err}
 	}
 	return body, nil
 }

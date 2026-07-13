@@ -117,17 +117,37 @@ func (e *CounterEndpointError) Error() string {
 	return "bedrock: invalid CountTokens endpoint: " + string(e.Reason)
 }
 
-// CounterRequestError wraps an unexpected local failure to encode the fixed
-// InvokeModel CountTokens envelope. It never retains request bytes.
+// CounterRequestReason classifies a local CountTokens request-envelope failure.
+type CounterRequestReason string
+
+const (
+	CounterRequestBodyTooLarge     CounterRequestReason = "InvokeModel body exceeds 25000000 bytes"
+	CounterRequestEnvelopeEncoding CounterRequestReason = "envelope encoding failed"
+)
+
+// CounterRequestError reports a local CountTokens envelope failure. It never
+// retains request bytes, model ids, or the rejected body length.
 type CounterRequestError struct {
-	Err error
+	Reason CounterRequestReason
+	Err    error
 }
 
 func (e *CounterRequestError) Error() string {
-	return "bedrock: encode CountTokens request envelope: " + e.Err.Error()
+	if e == nil || e.Reason == "" {
+		return "bedrock: encode CountTokens request envelope: unknown failure"
+	}
+	if e.Err == nil {
+		return "bedrock: encode CountTokens request envelope: " + string(e.Reason)
+	}
+	return "bedrock: encode CountTokens request envelope: " + string(e.Reason) + ": " + e.Err.Error()
 }
 
-func (e *CounterRequestError) Unwrap() error { return e.Err }
+func (e *CounterRequestError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 // CounterResponseReason classifies a successful response that cannot produce a
 // trustworthy normalized input-token count.

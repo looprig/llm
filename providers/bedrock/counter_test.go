@@ -249,6 +249,82 @@ func TestCounterEndpointBinding(t *testing.T) {
 	}
 }
 
+func TestCounterRequestEnvelopeBodyBounds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		size       int
+		wantReason CounterRequestReason
+	}{
+		{name: "empty body is accepted", size: 0},
+		{name: "maximum body is accepted", size: maxInvokeModelTokensBodyBytes},
+		{name: "one byte over maximum is rejected", size: maxInvokeModelTokensBodyBytes + 1, wantReason: CounterRequestBodyTooLarge},
+	}
+	const emptyEnvelope = `{"input":{"invokeModel":{"body":""}}}`
+	const bodySecret = "request-body-secret"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invokeBody := make([]byte, tt.size)
+			if tt.wantReason != "" {
+				copy(invokeBody, bodySecret)
+			}
+			body, err := buildCountRequestEnvelope(invokeBody)
+			if tt.wantReason != "" {
+				var requestErr *CounterRequestError
+				if !errors.As(err, &requestErr) {
+					t.Fatalf("buildCountRequestEnvelope() error = %T, want *CounterRequestError", err)
+				}
+				if requestErr.Reason != tt.wantReason {
+					t.Errorf("CounterRequestError.Reason = %q, want %q", requestErr.Reason, tt.wantReason)
+				}
+				if body != nil {
+					t.Errorf("buildCountRequestEnvelope() body length = %d on rejection, want nil", len(body))
+				}
+				if strings.Contains(err.Error(), bodySecret) {
+					t.Errorf("CounterRequestError leaked request body bytes: %q", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildCountRequestEnvelope() error = %v", err)
+			}
+			wantLength := len(emptyEnvelope) + base64.StdEncoding.EncodedLen(tt.size)
+			if len(body) != wantLength {
+				t.Errorf("envelope length = %d, want %d for %d-byte binary body", len(body), wantLength, tt.size)
+			}
+			if tt.size == 0 && string(body) != emptyEnvelope {
+				t.Errorf("empty body envelope = %s, want %s", body, emptyEnvelope)
+			}
+		})
+	}
+}
+
+func TestCounterRequestErrorIsSafe(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  *CounterRequestError
+	}{
+		{name: "zero value", err: &CounterRequestError{}},
+		{name: "reason without cause", err: &CounterRequestError{Reason: CounterRequestBodyTooLarge}},
+		{name: "encoding cause", err: &CounterRequestError{Reason: CounterRequestEnvelopeEncoding, Err: errors.New("safe encoding cause")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.err.Error()
+			if got == "" {
+				t.Error("CounterRequestError.Error() is empty")
+			}
+			if strings.Contains(got, "request-body-secret") {
+				t.Errorf("CounterRequestError.Error() leaked body bytes: %q", got)
+			}
+		})
+	}
+}
+
 func TestCounterResponseCounts(t *testing.T) {
 	t.Parallel()
 
