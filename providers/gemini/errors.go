@@ -6,6 +6,27 @@ import (
 	"github.com/looprig/inference"
 )
 
+// CounterStateReason classifies an unusable Counter or CountContext boundary.
+type CounterStateReason string
+
+const (
+	CounterStateNilReceiver          CounterStateReason = "nil counter"
+	CounterStateNilContext           CounterStateReason = "nil context"
+	CounterStateMissingEndpoint      CounterStateReason = "missing endpoint"
+	CounterStateMissingAuthenticator CounterStateReason = "missing authenticator"
+	CounterStateMissingHTTPDoer      CounterStateReason = "missing HTTP doer"
+	CounterStateInvalidTimeout       CounterStateReason = "invalid timeout"
+)
+
+// CounterStateError rejects an invalid counter before request encoding or I/O.
+type CounterStateError struct {
+	Reason CounterStateReason
+}
+
+func (e *CounterStateError) Error() string {
+	return "gemini: invalid countTokens counter state: " + string(e.Reason)
+}
+
 // CounterRequestReason classifies failure to build the countTokens envelope
 // from the already encoded complete GenerateContentRequest.
 type CounterRequestReason string
@@ -13,6 +34,7 @@ type CounterRequestReason string
 const (
 	CounterRequestGenerateBodyInvalid CounterRequestReason = "generateContentRequest body is not one JSON object"
 	CounterRequestModelEncodingFailed CounterRequestReason = "model resource JSON encoding failed"
+	CounterRequestModelCollision      CounterRequestReason = "generateContentRequest already contains model"
 )
 
 // CounterRequestError reports a local countTokens envelope invariant failure.
@@ -41,6 +63,9 @@ const (
 	CounterEndpointCredentials       CounterEndpointReason = "endpoint contains credentials"
 	CounterEndpointUnsupportedScheme CounterEndpointReason = "unsupported endpoint scheme"
 	CounterEndpointInsecureTransport CounterEndpointReason = "plaintext endpoint is not loopback"
+	CounterEndpointNonASCIIHost      CounterEndpointReason = "endpoint host is not ASCII"
+	CounterEndpointInvalidHost       CounterEndpointReason = "invalid endpoint host"
+	CounterEndpointAmbiguousPath     CounterEndpointReason = "ambiguous escaped endpoint path"
 )
 
 // CounterEndpointError rejects unsafe counter routing before any request I/O.
@@ -58,11 +83,33 @@ func (e *CounterEndpointError) Error() string {
 type CounterResponseReason string
 
 const (
-	CounterResponseMalformed    CounterResponseReason = "malformed response"
-	CounterResponseMissingCount CounterResponseReason = "missing totalTokens"
-	CounterResponseInvalidCount CounterResponseReason = "invalid totalTokens"
-	CounterResponseBodyTooLarge CounterResponseReason = "response body too large"
+	CounterResponseMalformed      CounterResponseReason = "malformed response"
+	CounterResponseMissingCount   CounterResponseReason = "missing totalTokens"
+	CounterResponseInvalidCount   CounterResponseReason = "invalid totalTokens"
+	CounterResponseDuplicateField CounterResponseReason = "duplicate response field"
+	CounterResponseBodyTooLarge   CounterResponseReason = "response body too large"
 )
+
+// CounterResponseField identifies one field in a countTokens response.
+type CounterResponseField string
+
+const CounterResponseFieldTotalTokens CounterResponseField = "totalTokens"
+
+// CounterResponseFieldReason classifies an ambiguous response field.
+type CounterResponseFieldReason string
+
+const CounterResponseFieldDuplicate CounterResponseFieldReason = "duplicate"
+
+// CounterResponseFieldError reports a field-level response ambiguity without
+// retaining provider-controlled values.
+type CounterResponseFieldError struct {
+	Field  CounterResponseField
+	Reason CounterResponseFieldReason
+}
+
+func (e *CounterResponseFieldError) Error() string {
+	return "gemini: countTokens response field " + string(e.Field) + ": " + string(e.Reason)
+}
 
 // CounterResponseError reports an invalid successful countTokens response.
 // Provider payload bytes are deliberately omitted so Error never leaks request

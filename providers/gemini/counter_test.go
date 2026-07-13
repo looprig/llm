@@ -205,6 +205,40 @@ func TestCounterRequestEnvelopeErrors(t *testing.T) {
 	}
 }
 
+func TestCounterRequestModelCollision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "exact model", body: []byte(`{"model":"existing","contents":[]}`)},
+		{name: "uppercase model", body: []byte(`{"MODEL":"existing","contents":[]}`)},
+		{name: "title case model", body: []byte(`{"contents":[],"Model":"existing"}`)},
+		{name: "duplicate exact model", body: []byte(`{"model":"first","model":"second"}`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := wrapGenerateContentRequest("requested-model", tt.body)
+			if got != nil {
+				t.Errorf("wrapGenerateContentRequest() = %s on collision, want nil", got)
+			}
+			var requestErr *CounterRequestError
+			if !errors.As(err, &requestErr) {
+				t.Fatalf("error = %T, want *CounterRequestError", err)
+			}
+			if requestErr.Reason != CounterRequestModelCollision {
+				t.Errorf("CounterRequestError.Reason = %q, want %q", requestErr.Reason, CounterRequestModelCollision)
+			}
+			if strings.Contains(err.Error(), "existing") || strings.Contains(err.Error(), "requested-model") {
+				t.Errorf("collision error exposes model data: %q", err)
+			}
+		})
+	}
+}
+
 func TestCounterPreflight(t *testing.T) {
 	t.Parallel()
 
@@ -320,6 +354,44 @@ func TestCounterResponseValidation(t *testing.T) {
 	}
 }
 
+func TestCounterRejectsDuplicateCount(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{name: "same value", response: `{"totalTokens":1,"totalTokens":1}`},
+		{name: "different values", response: `{"totalTokens":1,"totalTokens":2}`},
+		{name: "duplicate around another field", response: `{"totalTokens":1,"ignored":true,"totalTokens":2}`},
+		{name: "reverse field order", response: `{"ignored":true,"totalTokens":1,"totalTokens":1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := decodeCountResponse([]byte(tt.response))
+			if got != 0 {
+				t.Errorf("decodeCountResponse() = %d on duplicate, want zero", got)
+			}
+			var responseErr *CounterResponseError
+			if !errors.As(err, &responseErr) {
+				t.Fatalf("error = %T, want *CounterResponseError", err)
+			}
+			if responseErr.Reason != CounterResponseDuplicateField {
+				t.Errorf("CounterResponseError.Reason = %q, want %q", responseErr.Reason, CounterResponseDuplicateField)
+			}
+			var fieldErr *CounterResponseFieldError
+			if !errors.As(err, &fieldErr) {
+				t.Fatalf("error chain lacks *CounterResponseFieldError: %v", err)
+			}
+			if fieldErr.Field != CounterResponseFieldTotalTokens || fieldErr.Reason != CounterResponseFieldDuplicate {
+				t.Errorf("CounterResponseFieldError = %+v, want totalTokens/duplicate", fieldErr)
+			}
+		})
+	}
+}
+
 func TestCounterTransportErrors(t *testing.T) {
 	t.Parallel()
 
@@ -414,6 +486,130 @@ func TestCounterTransportErrors(t *testing.T) {
 	}
 }
 
+func TestCounterStateValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		build       func(*atomic.Bool) *Counter
+		wantReason  CounterStateReason
+		wantZeroCap bool
+	}{
+		{name: "nil receiver", ctx: context.Background(), build: func(*atomic.Bool) *Counter { return nil }, wantReason: CounterStateNilReceiver, wantZeroCap: true},
+		{name: "nil context", ctx: nil, build: validCounterWithSpy, wantReason: CounterStateNilContext},
+		{name: "missing endpoint", ctx: context.Background(), build: func(called *atomic.Bool) *Counter {
+			counter := validCounterWithSpy(called)
+			counter.endpoint = ""
+			return counter
+		}, wantReason: CounterStateMissingEndpoint, wantZeroCap: true},
+		{name: "missing authenticator", ctx: context.Background(), build: func(called *atomic.Bool) *Counter {
+			counter := validCounterWithSpy(called)
+			counter.auth = nil
+			return counter
+		}, wantReason: CounterStateMissingAuthenticator, wantZeroCap: true},
+		{name: "missing HTTP doer", ctx: context.Background(), build: func(called *atomic.Bool) *Counter {
+			counter := validCounterWithSpy(called)
+			counter.hc = nil
+			return counter
+		}, wantReason: CounterStateMissingHTTPDoer, wantZeroCap: true},
+		{name: "zero timeout", ctx: context.Background(), build: func(called *atomic.Bool) *Counter {
+			counter := validCounterWithSpy(called)
+			counter.timeout = 0
+			return counter
+		}, wantReason: CounterStateInvalidTimeout, wantZeroCap: true},
+		{name: "negative timeout", ctx: context.Background(), build: func(called *atomic.Bool) *Counter {
+			counter := validCounterWithSpy(called)
+			counter.timeout = -time.Second
+			return counter
+		}, wantReason: CounterStateInvalidTimeout, wantZeroCap: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+			counter := tt.build(&called)
+			got, err := counter.CountContext(tt.ctx, counterRequest("gemini-2.5-flash"))
+			if got != (inference.ContextCount{}) {
+				t.Errorf("CountContext() = %+v on invalid state, want zero", got)
+			}
+			var stateErr *CounterStateError
+			if !errors.As(err, &stateErr) {
+				t.Fatalf("error = %T %v, want *CounterStateError", err, err)
+			}
+			if stateErr.Reason != tt.wantReason {
+				t.Errorf("CounterStateError.Reason = %q, want %q", stateErr.Reason, tt.wantReason)
+			}
+			if called.Load() {
+				t.Error("transport called for invalid counter state")
+			}
+			if tt.wantZeroCap && counter.CounterCapability() != (inference.CounterCapability{}) {
+				t.Errorf("CounterCapability() = %+v for invalid counter state, want zero", counter.CounterCapability())
+			}
+		})
+	}
+}
+
+func TestCounterTimeout(t *testing.T) {
+	t.Parallel()
+
+	const (
+		shortTimeout   = 20 * time.Millisecond
+		callerTimeout  = 10 * time.Millisecond
+		longTimeout    = 250 * time.Millisecond
+		safetyRelease  = 250 * time.Millisecond
+		maximumElapsed = 150 * time.Millisecond
+	)
+	tests := []struct {
+		name           string
+		phase          counterDelayPhase
+		counterTimeout time.Duration
+		callerTimeout  time.Duration
+	}{
+		{name: "background context times out waiting for headers", phase: delayResponseHeaders, counterTimeout: shortTimeout},
+		{name: "background context times out reading body", phase: delayResponseBody, counterTimeout: shortTimeout},
+		{name: "earlier caller deadline wins", phase: delayResponseHeaders, counterTimeout: longTimeout, callerTimeout: callerTimeout},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			release := make(chan struct{})
+			timer := time.AfterFunc(safetyRelease, func() { close(release) })
+			defer timer.Stop()
+			srv := httptest.NewServer(delayedCounterHandler(tt.phase, release))
+			defer srv.Close()
+
+			counter := newCounter(counterTestKey, srv.URL)
+			counter.timeout = tt.counterTimeout
+			ctx := context.Background()
+			cancel := func() {}
+			if tt.callerTimeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, tt.callerTimeout)
+			}
+			defer cancel()
+
+			started := time.Now()
+			got, err := counter.CountContext(ctx, counterRequest("gemini-2.5-flash"))
+			elapsed := time.Since(started)
+			if got != (inference.ContextCount{}) {
+				t.Errorf("CountContext() = %+v on timeout, want zero", got)
+			}
+			var networkErr *inference.NetworkError
+			if !errors.As(err, &networkErr) {
+				t.Fatalf("error = %T %v, want *inference.NetworkError", err, err)
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("error = %v, want wrapped context deadline", err)
+			}
+			if elapsed > maximumElapsed {
+				t.Errorf("CountContext() elapsed = %s, want internal/earlier caller deadline under %s", elapsed, maximumElapsed)
+			}
+		})
+	}
+}
+
 func TestCounterCapability(t *testing.T) {
 	t.Parallel()
 
@@ -500,6 +696,47 @@ func TestCounterCanonicalEndpointRoute(t *testing.T) {
 	}
 }
 
+func TestCounterEndpointEquivalence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		left         string
+		right        string
+		wantEndpoint string
+	}{
+		{name: "DNS case trailing dot default port and dot path", left: "HTTPS://EXAMPLE.COM.:443/v1beta/./", right: "https://example.com/v1beta", wantEndpoint: "https://example.com/v1beta"},
+		{name: "IPv6 compression and default port", left: "https://[0:0:0:0:0:0:0:1]:443/v1beta", right: "https://[::1]/v1beta", wantEndpoint: "https://[::1]/v1beta"},
+		{name: "path duplicate and parent segments", left: "https://example.com/v1beta//child/../", right: "https://example.com/v1beta", wantEndpoint: "https://example.com/v1beta"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			left := newCounter(counterTestKey, tt.left)
+			right := newCounter(counterTestKey, tt.right)
+			if left.endpoint != tt.wantEndpoint || right.endpoint != tt.wantEndpoint {
+				t.Errorf("canonical endpoints = (%q, %q), want %q", left.endpoint, right.endpoint, tt.wantEndpoint)
+			}
+			if left.CounterCapability() != right.CounterCapability() {
+				t.Errorf("equivalent endpoints produced different capabilities: left=%+v right=%+v", left.CounterCapability(), right.CounterCapability())
+			}
+			requestURL := make(chan string, 1)
+			left.hc = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requestURL <- req.URL.String()
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"totalTokens":1}`)), Header: make(http.Header)}, nil
+			})}
+			_, err := left.CountContext(context.Background(), counterRequest("gemini-2.5-flash"))
+			if err != nil {
+				t.Fatalf("CountContext() error = %v", err)
+			}
+			if got, want := <-requestURL, tt.wantEndpoint+"/models/gemini-2.5-flash:countTokens"; got != want {
+				t.Errorf("request URL = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestCounterRejectsUnsafeEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -514,6 +751,11 @@ func TestCounterRejectsUnsafeEndpoint(t *testing.T) {
 		{name: "missing host", endpoint: "https:///v1beta", reason: CounterEndpointMissingHost},
 		{name: "unsupported scheme", endpoint: "ftp://example.com/v1beta", reason: CounterEndpointUnsupportedScheme},
 		{name: "malformed URL", endpoint: "://bad-endpoint", reason: CounterEndpointMalformed},
+		{name: "non-ASCII host", endpoint: "https://éxample.com/v1beta", reason: CounterEndpointNonASCIIHost},
+		{name: "IPv6 zone", endpoint: "https://[fe80::1%25en0]/v1beta", reason: CounterEndpointInvalidHost},
+		{name: "double DNS trailing dot", endpoint: "https://example.com../v1beta", reason: CounterEndpointInvalidHost},
+		{name: "ambiguous escaped path", endpoint: "https://example.com/v1%62eta", reason: CounterEndpointAmbiguousPath},
+		{name: "invalid named port", endpoint: "https://example.com:bad/v1beta", reason: CounterEndpointMalformed},
 	}
 
 	for _, tt := range tests {
@@ -603,13 +845,23 @@ func FuzzCounterResponse(f *testing.F) {
 	seeds := []string{
 		`{}`, `{"totalTokens":0}`, `{"totalTokens":null}`, `{"totalTokens":-1}`,
 		`{"totalTokens":1.5}`, `{"totalTokens":9223372036854775808}`, `{"totalTokens":"value"}`,
+		`{"totalTokens":1,"totalTokens":1}`, `{"totalTokens":1,"totalTokens":2}`,
+		`{"ignored":true,"totalTokens":1,"totalTokens":1}`,
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
 	}
 
 	f.Fuzz(func(t *testing.T, input string) {
+		duplicate := hasDuplicateTotalTokens([]byte(input))
 		_, err := decodeCountResponse([]byte(input))
+		if duplicate {
+			var fieldErr *CounterResponseFieldError
+			if !errors.As(err, &fieldErr) || fieldErr.Field != CounterResponseFieldTotalTokens || fieldErr.Reason != CounterResponseFieldDuplicate {
+				t.Fatalf("duplicate totalTokens error = %T %v, want typed duplicate field chain", err, err)
+			}
+			return
+		}
 		if err == nil {
 			return
 		}
@@ -624,9 +876,14 @@ func FuzzCounterEndpoint(f *testing.F) {
 	seeds := []string{
 		defaultBaseURL,
 		"HTTPS://GENERATIVELANGUAGE.GOOGLEAPIS.COM:443/v1beta/",
+		"HTTPS://EXAMPLE.COM.:443/v1beta/./",
+		"https://[0:0:0:0:0:0:0:1]:443/v1beta",
 		"http://127.0.0.1:8080/?credential=private#fragment",
 		"https://agent:private@example.com/v1beta",
 		"http://example.com/v1beta",
+		"https://éxample.com/v1beta",
+		"https://[fe80::1%25en0]/v1beta",
+		"https://example.com/v1%62eta",
 		"://bad-endpoint",
 	}
 	for _, seed := range seeds {
@@ -650,6 +907,14 @@ func FuzzCounterEndpoint(f *testing.F) {
 		}
 		if parsed.Path != "" && strings.HasSuffix(parsed.Path, "/") {
 			t.Fatalf("canonical endpoint retains trailing slash: %q", canonical)
+		}
+		if parsed.RawPath != "" || parsed.Path != canonicalEndpointPath(parsed.Path) {
+			t.Fatalf("canonical endpoint retains ambiguous path: %q", canonical)
+		}
+		for _, char := range parsed.Hostname() {
+			if char > 127 {
+				t.Fatalf("canonical endpoint retains non-ASCII host: %q", canonical)
+			}
 		}
 		again, againErr := canonicalCounterEndpoint(canonical)
 		if againErr != nil || again != canonical {
@@ -736,6 +1001,76 @@ func assertCountGenerateRequest(t *testing.T, nested, codecBody []byte, wantMode
 	if !bytes.Equal(nested, expected) {
 		t.Errorf("generateContentRequest bytes = %s, want lossless deterministic merge %s", nested, expected)
 	}
+}
+
+func validCounterWithSpy(called *atomic.Bool) *Counter {
+	counter := newCounter(counterTestKey, defaultBaseURL)
+	counter.hc = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		called.Store(true)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"totalTokens":1}`)), Header: make(http.Header)}, nil
+	})}
+	return counter
+}
+
+func hasDuplicateTotalTokens(body []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	start, err := decoder.Token()
+	if err != nil {
+		return false
+	}
+	delim, ok := start.(json.Delim)
+	if !ok || delim != '{' {
+		return false
+	}
+	count := 0
+	for decoder.More() {
+		nameToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return false
+		}
+		name, ok := nameToken.(string)
+		if !ok {
+			return false
+		}
+		var value json.RawMessage
+		if decodeErr := decoder.Decode(&value); decodeErr != nil {
+			return false
+		}
+		if name == string(CounterResponseFieldTotalTokens) {
+			count++
+		}
+	}
+	return count > 1
+}
+
+type counterDelayPhase uint8
+
+const (
+	delayResponseHeaders counterDelayPhase = iota + 1
+	delayResponseBody
+)
+
+func delayedCounterHandler(phase counterDelayPhase, release <-chan struct{}) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if phase == delayResponseBody {
+			w.Header().Set("Content-Type", contentTypeJSON)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"totalTokens":`)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		select {
+		case <-req.Context().Done():
+			return
+		case <-release:
+		}
+		if phase == delayResponseBody {
+			_, _ = io.WriteString(w, `1}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"totalTokens":1}`)
+	})
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
