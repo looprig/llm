@@ -19,7 +19,7 @@ import (
 // Model (OriginCustom) via inference.CustomModel, used purely as a test fixture. They
 // keep the repeated model rows DRY across this file's dispatch tables.
 func chutesKimiK2Model() inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderChutes), inference.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", inference.WithMaxContext(128_000), inference.WithTools(), inference.WithThinking())
+	return inference.CustomModel(inference.ProviderName(llm.ProviderChutes), inference.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 128_000}), inference.WithTools(), inference.WithThinking())
 }
 
 func openRouterModel(name string) inference.Model {
@@ -27,7 +27,7 @@ func openRouterModel(name string) inference.Model {
 }
 
 func geminiFlashModel() inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderGoogle), inference.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash", inference.WithMaxContext(1_000_000), inference.WithTools(), inference.WithImages(), inference.WithThinking())
+	return inference.CustomModel(inference.ProviderName(llm.ProviderGoogle), inference.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 1_000_000}), inference.WithTools(), inference.WithImages(), inference.WithThinking())
 }
 
 func lmStudioLocalModel(name string) inference.Model {
@@ -55,7 +55,7 @@ func TestNew(t *testing.T) {
 		{name: "google with key", model: geminiFlashModel(), key: "AIza-k"},
 		{name: "lmstudio without key (AuthNone)", model: lmStudioLocalModel("qwen"), key: ""},
 		{name: "lmstudio ignores a supplied key", model: lmStudioLocalModel("qwen"), key: "k"},
-		{name: "phala empty key fails closed", model: inference.CustomModel(inference.ProviderName(llm.ProviderPhala), inference.APIFormatOpenAI, "https://api.phala.network/v1", "zai-org/GLM-4.6", inference.WithMaxContext(200_000), inference.WithTools(), inference.WithThinking()), key: "", wantErr: true, wantAuthReq: true},
+		{name: "phala empty key fails closed", model: inference.CustomModel(inference.ProviderName(llm.ProviderPhala), inference.APIFormatOpenAI, "https://api.phala.network/v1", "zai-org/GLM-4.6", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithThinking()), key: "", wantErr: true, wantAuthReq: true},
 		{name: "chutes empty key fails closed", model: chutesKimiK2Model(), key: "", wantErr: true, wantAuthReq: true},
 		{name: "openrouter empty key fails closed", model: openRouterModel("x"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "google empty key fails closed", model: geminiFlashModel(), key: "", wantErr: true, wantAuthReq: true},
@@ -133,7 +133,7 @@ func TestNewBedrockDirectsToConstructor(t *testing.T) {
 
 	// An empty key must NOT surface as an AuthRequiredError here: bedrock's auth
 	// kind is SigV4, not APIKey, so the Phase-1 empty-APIKey guard is skipped.
-	got, err := New(inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", "anthropic.claude-3-5-sonnet-20241022-v2:0", inference.WithMaxContext(200_000), inference.WithTools(), inference.WithImages()), "")
+	got, err := New(inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", "anthropic.claude-3-5-sonnet-20241022-v2:0", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithImages()), "")
 	if got != nil {
 		t.Fatalf("New() returned non-nil client (%T) for a SigV4 provider", got)
 	}

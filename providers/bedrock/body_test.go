@@ -135,7 +135,7 @@ func bytesEqualJSON(a, b json.RawMessage) bool {
 // bedrockRequest builds a minimal valid ProviderBedrock request for name.
 func bedrockRequest(name string) inference.Request {
 	return inference.Request{
-		Model: inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", name, inference.WithMaxContext(200_000), inference.WithTools(), inference.WithImages()),
+		Model: inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", name, inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithImages()),
 		Messages: content.AgenticMessages{
 			&content.UserMessage{Message: content.Message{
 				Role:   content.RoleUser,
