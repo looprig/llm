@@ -1,7 +1,9 @@
 .PHONY: test fmt fmt-check lint vuln verify secure fuzz
 
 # Module's own package dirs, excluding vendor/ and the nested .worktrees/ modules
-# (go list ./... stops at nested module boundaries and skips vendor).
+# (go list ./... stops at nested module boundaries and skips vendor). GO_DIRS is
+# intentionally reserved for tools such as gosec that accept package dirs:
+# Go 1.26 gofmt recursively walks directory operands and would mutate vendor/.
 GO_DIRS := $(shell go list -f '{{.Dir}}' ./...)
 
 # Build from the vendored dependency tree: offline, reproducible, and auditable
@@ -14,13 +16,25 @@ export GOFLAGS := -mod=vendor
 test:
 	go test -race ./...
 
-# Format the whole module in place.
+# Format every Go file directly in each first-party package directory. The find
+# depth includes platform-specific files while excluding vendor and nested
+# module trees. Quoted, line-delimited package dirs preserve spaces in paths.
 fmt:
-	gofmt -w $(GO_DIRS)
+	@set -e; \
+	dirs=$$(go list -f '{{.Dir}}' ./...); \
+	if [ -z "$$dirs" ]; then exit 0; fi; \
+	printf '%s\n' "$$dirs" | while IFS= read -r dir; do \
+		find "$$dir" -maxdepth 1 -type f -name '*.go' -exec gofmt -w {} + || exit $$?; \
+	done
 
 # Fail (non-zero exit) if any tracked Go file is not gofmt-clean. Wired into lint.
 fmt-check:
-	@unformatted=$$(gofmt -l $(GO_DIRS)); \
+	@set -e; \
+	dirs=$$(go list -f '{{.Dir}}' ./...); \
+	if [ -z "$$dirs" ]; then exit 0; fi; \
+	unformatted=$$(printf '%s\n' "$$dirs" | while IFS= read -r dir; do \
+		find "$$dir" -maxdepth 1 -type f -name '*.go' -exec gofmt -l {} + || exit $$?; \
+	done); \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed (run 'make fmt'):"; echo "$$unformatted"; exit 1; \
 	fi
