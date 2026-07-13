@@ -1,4 +1,4 @@
-.PHONY: test fmt fmt-check lint vuln verify secure fuzz
+.PHONY: test fmt fmt-check vendor vendor-check lint vuln verify secure fuzz
 
 # Module's own package dirs, excluding vendor/ and the nested .worktrees/ modules
 # (go list ./... stops at nested module boundaries and skips vendor). GO_DIRS is
@@ -15,6 +15,26 @@ export GOFLAGS := -mod=vendor
 
 test:
 	go test -race ./...
+
+# Refresh the checked-in dependency tree and reject repository metadata copied
+# from local replace targets. A nested .git file can contain an absolute worktree
+# path while remaining invisible to the parent repository's git status.
+vendor:
+	go mod vendor
+	# Go copies the regular .git pointer from the local inference replace target.
+	# Remove only that known artifact; vendor-check rejects directories or any
+	# additional repository metadata instead of silently deleting them.
+	$(RM) vendor/github.com/looprig/inference/.git
+	@$(MAKE) --no-print-directory vendor-check
+
+vendor-check:
+	@set -e; \
+	hidden_git=$$(find vendor -name .git -print -quit); \
+	if [ -n "$$hidden_git" ]; then \
+		echo "forbidden Git metadata in vendor tree:" >&2; \
+		printf '%s\n' "$$hidden_git" >&2; \
+		exit 1; \
+	fi
 
 # Format every Go file directly in each first-party package directory. The find
 # depth includes platform-specific files while excluding vendor and nested
@@ -39,7 +59,7 @@ fmt-check:
 		echo "gofmt needed (run 'make fmt'):"; echo "$$unformatted"; exit 1; \
 	fi
 
-lint: fmt-check
+lint: fmt-check vendor-check
 	go vet ./...
 	go tool staticcheck ./...
 	# gosec is NOT module-aware: its ./... is a filesystem walk that descends into
