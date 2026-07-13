@@ -41,8 +41,10 @@ const (
 	// path fragments: /model/<model-id>/invoke.
 	pathModelPrefix  = "/model/"
 	pathInvokeSuffix = "/invoke"
+	pathCountSuffix  = "/count-tokens"
 
 	contentTypeJSON = "application/json"
+	maxRegionBytes  = 64
 )
 
 // Timeout budget for the connect/TLS/header phases, mirroring the generic
@@ -76,16 +78,39 @@ type Client struct {
 // (AccessKeyID, SecretAccessKey) is empty — no Client and no network object are
 // created. The session token is optional (used for temporary credentials).
 func New(creds auth.SigV4Credentials, region string) (inference.Client, error) {
-	if region == "" {
-		return nil, &ConfigError{Field: "region", Reason: "AWS region must not be empty"}
-	}
-	if creds.AccessKeyID == "" {
-		return nil, &ConfigError{Field: "AccessKeyID", Reason: "SigV4 AccessKeyID must not be empty"}
-	}
-	if creds.SecretAccessKey == "" {
-		return nil, &ConfigError{Field: "SecretAccessKey", Reason: "SigV4 SecretAccessKey must not be empty"}
+	if err := validateConfig(creds, region); err != nil {
+		return nil, err
 	}
 	return newClient(creds, region, defaultEndpoint(region)), nil
+}
+
+func validateConfig(creds auth.SigV4Credentials, region string) error {
+	if region == "" {
+		return &ConfigError{Field: "region", Reason: "AWS region must not be empty"}
+	}
+	if !validRegion(region) {
+		return &ConfigError{Field: "region", Reason: "AWS region must contain only lowercase ASCII letters, digits, and interior hyphens"}
+	}
+	if creds.AccessKeyID == "" {
+		return &ConfigError{Field: "AccessKeyID", Reason: "SigV4 AccessKeyID must not be empty"}
+	}
+	if creds.SecretAccessKey == "" {
+		return &ConfigError{Field: "SecretAccessKey", Reason: "SigV4 SecretAccessKey must not be empty"}
+	}
+	return nil
+}
+
+func validRegion(region string) bool {
+	if len(region) == 0 || len(region) > maxRegionBytes || region[0] == '-' || region[len(region)-1] == '-' {
+		return false
+	}
+	for _, char := range region {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // newClient wires a Client for a validated region + endpoint. endpoint is the
@@ -97,20 +122,24 @@ func newClient(creds auth.SigV4Credentials, region, endpoint string) *Client {
 		region:   region,
 		endpoint: endpoint,
 		signer:   auth.SigV4(creds, region, bedrockService),
-		hc: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				DialContext: (&net.Dialer{
-					Timeout:   dialTimeout,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-				TLSHandshakeTimeout:   tlsHandshakeTimeout,
-				ResponseHeaderTimeout: responseHeaderTimeout,
-				ExpectContinueTimeout: expectContinueTimeout,
-				IdleConnTimeout:       idleConnTimeout,
-				ForceAttemptHTTP2:     true,
-			},
+		hc:       newHTTPClient(),
+	}
+}
+
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   dialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout:   tlsHandshakeTimeout,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			ExpectContinueTimeout: expectContinueTimeout,
+			IdleConnTimeout:       idleConnTimeout,
+			ForceAttemptHTTP2:     true,
 		},
 	}
 }
@@ -202,7 +231,11 @@ func (c *Client) checkBinding(m inference.Model) error {
 // then double-encodes it into the canonical URI ("%3A"). Headers are set before
 // signing so they are covered by the signature.
 func (c *Client) buildRequest(ctx context.Context, modelID string, body []byte) (*http.Request, error) {
-	rawURL := c.endpoint + pathModelPrefix + url.PathEscape(modelID) + pathInvokeSuffix
+	return buildRuntimeRequest(ctx, c.endpoint, modelID, pathInvokeSuffix, body)
+}
+
+func buildRuntimeRequest(ctx context.Context, endpoint, modelID, suffix string, body []byte) (*http.Request, error) {
+	rawURL := endpoint + pathModelPrefix + url.PathEscape(modelID) + suffix
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, &RequestBuildError{Err: err}

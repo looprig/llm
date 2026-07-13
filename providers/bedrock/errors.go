@@ -69,3 +69,90 @@ type StreamingNotSupportedError struct{}
 func (*StreamingNotSupportedError) Error() string {
 	return "bedrock: streaming (AWS eventstream) is not yet implemented; use Invoke"
 }
+
+// CounterStateReason classifies an unusable CountTokens counter boundary.
+type CounterStateReason string
+
+const (
+	CounterStateNilReceiver          CounterStateReason = "nil counter"
+	CounterStateNilContext           CounterStateReason = "nil context"
+	CounterStateMissingEndpoint      CounterStateReason = "missing endpoint"
+	CounterStateMissingRegion        CounterStateReason = "missing region"
+	CounterStateMissingAuthenticator CounterStateReason = "missing authenticator"
+	CounterStateMissingHTTPDoer      CounterStateReason = "missing HTTP doer"
+	CounterStateInvalidTimeout       CounterStateReason = "invalid timeout"
+)
+
+// CounterStateError rejects invalid local state before encoding or I/O.
+type CounterStateError struct {
+	Reason CounterStateReason
+}
+
+func (e *CounterStateError) Error() string {
+	return "bedrock: invalid CountTokens counter state: " + string(e.Reason)
+}
+
+// CounterEndpointReason classifies an endpoint that cannot safely receive a
+// complete request. It deliberately carries no rejected endpoint text.
+type CounterEndpointReason string
+
+const (
+	CounterEndpointMalformed           CounterEndpointReason = "malformed endpoint"
+	CounterEndpointMissingHost         CounterEndpointReason = "missing endpoint host"
+	CounterEndpointCredentials         CounterEndpointReason = "endpoint contains credentials"
+	CounterEndpointUnsupportedScheme   CounterEndpointReason = "unsupported endpoint scheme"
+	CounterEndpointInsecureTransport   CounterEndpointReason = "plaintext endpoint is not loopback"
+	CounterEndpointNonASCIIHost        CounterEndpointReason = "endpoint host is not ASCII"
+	CounterEndpointInvalidHost         CounterEndpointReason = "invalid endpoint host"
+	CounterEndpointUnexpectedComponent CounterEndpointReason = "endpoint contains an unexpected path, query, or fragment"
+)
+
+// CounterEndpointError rejects unsafe routing without retaining credentials or
+// provider input from the raw endpoint.
+type CounterEndpointError struct {
+	Reason CounterEndpointReason
+}
+
+func (e *CounterEndpointError) Error() string {
+	return "bedrock: invalid CountTokens endpoint: " + string(e.Reason)
+}
+
+// CounterRequestError wraps an unexpected local failure to encode the fixed
+// InvokeModel CountTokens envelope. It never retains request bytes.
+type CounterRequestError struct {
+	Err error
+}
+
+func (e *CounterRequestError) Error() string {
+	return "bedrock: encode CountTokens request envelope: " + e.Err.Error()
+}
+
+func (e *CounterRequestError) Unwrap() error { return e.Err }
+
+// CounterResponseReason classifies a successful response that cannot produce a
+// trustworthy normalized input-token count.
+type CounterResponseReason string
+
+const (
+	CounterResponseMalformed      CounterResponseReason = "malformed response"
+	CounterResponseMissingCount   CounterResponseReason = "missing inputTokens"
+	CounterResponseInvalidCount   CounterResponseReason = "invalid inputTokens"
+	CounterResponseDuplicateField CounterResponseReason = "duplicate inputTokens"
+	CounterResponseBodyTooLarge   CounterResponseReason = "response body too large"
+)
+
+// CounterResponseError omits provider-controlled bytes from Error while its
+// typed cause remains available through errors.As.
+type CounterResponseError struct {
+	Reason CounterResponseReason
+	Err    error
+}
+
+func (e *CounterResponseError) Error() string {
+	if e.Err == nil {
+		return "bedrock: CountTokens response: " + string(e.Reason)
+	}
+	return "bedrock: CountTokens response: " + string(e.Reason) + ": " + e.Err.Error()
+}
+
+func (e *CounterResponseError) Unwrap() error { return e.Err }
