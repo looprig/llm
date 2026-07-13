@@ -39,11 +39,11 @@ Use the standard go tooling for working with modules to incorporate it.
 
 ## Examples
 
-* [Sign Message](https://pkg.go.dev/github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa#example-package-SignMessage)
+* [Sign Message](https://pkg.go.dev/github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa#example-package-SignMessage)  
   Demonstrates signing a message with a secp256k1 private key that is first
   parsed from raw bytes and serializing the generated signature.
 
-* [Verify Signature](https://pkg.go.dev/github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa#example-Signature.Verify)
+* [Verify Signature](https://pkg.go.dev/github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa#example-Signature.Verify)  
   Demonstrates verifying a secp256k1 signature against a public key that is
   first parsed from raw bytes.  The signature is also parsed from raw bytes.
 
