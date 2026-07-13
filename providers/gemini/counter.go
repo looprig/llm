@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -35,9 +36,10 @@ const (
 // embedded in Client so an inference client can never acquire the optional
 // ContextCounter capability accidentally.
 type Counter struct {
-	endpoint string
-	auth     inference.Authenticator
-	hc       requestDoer
+	endpoint    string
+	endpointErr *CounterEndpointError
+	auth        inference.Authenticator
+	hc          requestDoer
 }
 
 var _ inference.ContextCounter = (*Counter)(nil)
@@ -51,19 +53,28 @@ func NewCounter(key auth.APIKey) (inference.ContextCounter, error) {
 	if key == "" {
 		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGoogle, Kind: inference.AuthAPIKey}
 	}
-	return newCounter(key, defaultBaseURL), nil
+	counter := newCounter(key, defaultBaseURL)
+	if counter.endpointErr != nil {
+		return nil, counter.endpointErr
+	}
+	return counter, nil
 }
 
 func newCounter(key auth.APIKey, endpoint string) *Counter {
+	canonical, endpointErr := canonicalCounterEndpoint(endpoint)
 	return &Counter{
-		endpoint: endpoint,
-		auth:     auth.Header(key, apiKeyHeader),
-		hc:       newHTTPClient(),
+		endpoint:    canonical,
+		endpointErr: endpointErr,
+		auth:        auth.Header(key, apiKeyHeader),
+		hc:          newHTTPClient(),
 	}
 }
 
 // CountContext sends the complete encoded inference request to countTokens.
 func (c *Counter) CountContext(ctx context.Context, req inference.Request) (inference.ContextCount, error) {
+	if c.endpointErr != nil {
+		return inference.ContextCount{}, c.endpointErr
+	}
 	body, err := c.preflight(req)
 	if err != nil {
 		return inference.ContextCount{}, err
@@ -96,7 +107,19 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 	if req.Model.APIFormat != inference.APIFormatGemini {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
-	return geminicodec.EncodeRequest(req)
+	generateBody, err := geminicodec.EncodeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	return wrapGenerateContentRequest(generateBody), nil
+}
+
+func wrapGenerateContentRequest(generateBody []byte) []byte {
+	const prefix = `{"generateContentRequest":`
+	body := make([]byte, 0, len(prefix)+len(generateBody)+1)
+	body = append(body, prefix...)
+	body = append(body, generateBody...)
+	return append(body, '}')
 }
 
 func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
@@ -194,7 +217,7 @@ func countNormalizationError(reason inference.UsageNormalizationReason) error {
 // CounterCapability declares countTokens as exact provider counting over the
 // same Google API endpoint, conservatively allowing provider logging.
 func (c *Counter) CounterCapability() inference.CounterCapability {
-	if c == nil {
+	if c == nil || c.endpointErr != nil {
 		return inference.CounterCapability{}
 	}
 	return inference.CounterCapability{
@@ -208,20 +231,78 @@ func (c *Counter) CounterCapability() inference.CounterCapability {
 }
 
 func counterSecurityIdentity(endpoint string) inference.SecurityIdentity {
-	canonical := canonicalCounterEndpoint(endpoint)
-	material := "provider=google\nendpoint=" + canonical + "\nauth=x-goog-api-key\ntransport=tls\npolicy=" + googleSecurityPolicyRevision
+	material := "provider=google\nendpoint=" + endpoint + "\nauth=x-goog-api-key\ntransport=tls\npolicy=" + googleSecurityPolicyRevision
 	return inference.SecurityIdentity(sha256.Sum256([]byte(material)))
 }
 
-func canonicalCounterEndpoint(endpoint string) string {
+func canonicalCounterEndpoint(endpoint string) (string, *CounterEndpointError) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return strings.TrimRight(endpoint, "/")
+		return "", counterEndpointError(CounterEndpointMalformed)
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
+	if parsed.Scheme == "" {
+		return "", counterEndpointError(CounterEndpointMalformed)
+	}
+	if parsed.User != nil {
+		return "", counterEndpointError(CounterEndpointCredentials)
+	}
+	if parsed.Host == "" || parsed.Hostname() == "" {
+		return "", counterEndpointError(CounterEndpointMissingHost)
+	}
+	switch parsed.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackHost(parsed.Hostname()) {
+			return "", counterEndpointError(CounterEndpointInsecureTransport)
+		}
+	default:
+		return "", counterEndpointError(CounterEndpointUnsupportedScheme)
+	}
+	if !validEndpointPort(parsed.Port()) {
+		return "", counterEndpointError(CounterEndpointMalformed)
+	}
+	parsed.Host = canonicalHost(parsed)
+	parsed.User = nil
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = ""
 	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	parsed.Fragment = ""
-	return parsed.String()
+	return parsed.String(), nil
+}
+
+func canonicalHost(parsed *url.URL) string {
+	host := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if (parsed.Scheme == "https" && port == "443") || (parsed.Scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		return net.JoinHostPort(host, port)
+	}
+	if strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return host
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func validEndpointPort(port string) bool {
+	if port == "" {
+		return true
+	}
+	value, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && value != 0
+}
+
+func counterEndpointError(reason CounterEndpointReason) *CounterEndpointError {
+	return &CounterEndpointError{Reason: reason}
 }

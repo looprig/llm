@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -117,8 +119,19 @@ func TestCounterCountContext(t *testing.T) {
 			if wire.contentType != contentTypeJSON || wire.accept != contentTypeJSON {
 				t.Errorf("content headers = (%q, %q), want application/json", wire.contentType, wire.accept)
 			}
-			if !bytes.Equal(wire.body, wantBody) {
-				t.Errorf("request body = %s, want byte-identical complete inference body %s", wire.body, wantBody)
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(wire.body, &envelope); err != nil {
+				t.Fatalf("countTokens request body unmarshal error = %v", err)
+			}
+			if len(envelope) != 1 {
+				t.Fatalf("countTokens request fields = %d, want only generateContentRequest: %s", len(envelope), wire.body)
+			}
+			nested, ok := envelope["generateContentRequest"]
+			if !ok {
+				t.Fatalf("countTokens request = %s, want generateContentRequest wrapper", wire.body)
+			}
+			if !bytes.Equal(nested, wantBody) {
+				t.Errorf("nested generateContentRequest = %s, want byte-identical complete inference body %s", nested, wantBody)
 			}
 		})
 	}
@@ -340,6 +353,7 @@ func TestCounterCapability(t *testing.T) {
 	first := newCounter("key-one", endpoint).CounterCapability()
 	second := newCounter("key-two", strings.TrimSuffix(endpoint, "/")).CounterCapability()
 	differentEndpoint := newCounter("key-one", "https://example.googleapis.com/v1beta").CounterCapability()
+	defaultPortEndpoint := newCounter("key-one", "HTTPS://GENERATIVELANGUAGE.GOOGLEAPIS.COM:443/v1beta").CounterCapability()
 
 	tests := []struct {
 		name      string
@@ -349,6 +363,7 @@ func TestCounterCapability(t *testing.T) {
 	}{
 		{name: "structurally valid", got: first},
 		{name: "same endpoint ignores credential", got: second, wantEqual: &first},
+		{name: "scheme host and default port normalize", got: defaultPortEndpoint, wantEqual: &first},
 		{name: "different endpoint has different identity", got: differentEndpoint, wantDiff: &first},
 	}
 
@@ -373,6 +388,98 @@ func TestCounterCapability(t *testing.T) {
 			keyDigest := sha256.Sum256([]byte("key-one"))
 			if tt.got.SecurityIdentity == inference.SecurityIdentity(keyDigest) {
 				t.Error("SecurityIdentity is a credential digest")
+			}
+		})
+	}
+}
+
+func TestCounterCanonicalEndpointRoute(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		suffix string
+	}{
+		{name: "canonical endpoint", suffix: ""},
+		{name: "trailing slash removed", suffix: "/"},
+		{name: "empty query marker removed", suffix: "/?"},
+		{name: "query and fragment removed", suffix: "/?credential=private#fragment-secret"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pathCh := make(chan string, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				pathCh <- req.URL.EscapedPath() + "?" + req.URL.RawQuery
+				_, _ = io.WriteString(w, `{"totalTokens":1}`)
+			}))
+			defer srv.Close()
+
+			base := newCounter(counterTestKey, srv.URL)
+			counter := newCounter(counterTestKey, srv.URL+tt.suffix)
+			if counter.CounterCapability().SecurityIdentity != base.CounterCapability().SecurityIdentity {
+				t.Error("equivalent endpoint produced a different SecurityIdentity")
+			}
+			_, err := counter.CountContext(context.Background(), counterRequest("gemini-2.5-flash"))
+			if err != nil {
+				t.Fatalf("CountContext() error = %v", err)
+			}
+			if got, want := <-pathCh, "/models/gemini-2.5-flash:countTokens?"; got != want {
+				t.Errorf("wire route = %q, want canonical %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCounterRejectsUnsafeEndpoint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		endpoint string
+		secret   string
+		reason   CounterEndpointReason
+	}{
+		{name: "userinfo credentials", endpoint: "https://agent:private-password@example.com/v1beta", secret: "private-password", reason: CounterEndpointCredentials},
+		{name: "non-loopback plaintext", endpoint: "http://example.com/v1beta", reason: CounterEndpointInsecureTransport},
+		{name: "missing host", endpoint: "https:///v1beta", reason: CounterEndpointMissingHost},
+		{name: "unsupported scheme", endpoint: "ftp://example.com/v1beta", reason: CounterEndpointUnsupportedScheme},
+		{name: "malformed URL", endpoint: "://bad-endpoint", reason: CounterEndpointMalformed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+			counter := newCounter(counterTestKey, tt.endpoint)
+			counter.hc = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				called.Store(true)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"totalTokens":1}`)), Header: make(http.Header)}, nil
+			})}
+
+			_, err := counter.CountContext(context.Background(), counterRequest("gemini-2.5-flash"))
+			if err == nil {
+				t.Fatal("CountContext() error = nil, want endpoint rejection")
+			}
+			var endpointErr *CounterEndpointError
+			if !errors.As(err, &endpointErr) {
+				t.Fatalf("error = %T, want *CounterEndpointError", err)
+			}
+			if endpointErr.Reason != tt.reason {
+				t.Errorf("CounterEndpointError.Reason = %q, want %q", endpointErr.Reason, tt.reason)
+			}
+			if called.Load() {
+				t.Error("transport called for unsafe endpoint")
+			}
+			if tt.secret != "" && strings.Contains(err.Error(), tt.secret) {
+				t.Errorf("endpoint error exposes credential: %q", err)
+			}
+			if tt.secret != "" && strings.Contains(counter.endpoint, tt.secret) {
+				t.Errorf("counter transport config retains credential: %q", counter.endpoint)
+			}
+			if got := counter.CounterCapability(); got != (inference.CounterCapability{}) {
+				t.Errorf("CounterCapability() = %+v for unsafe endpoint, want zero metadata", got)
 			}
 		})
 	}
@@ -441,6 +548,44 @@ func FuzzCounterResponse(f *testing.F) {
 		var responseErr *CounterResponseError
 		if !errors.As(err, &responseErr) {
 			t.Fatalf("decodeCountResponse() error = %T %v, want *CounterResponseError", err, err)
+		}
+	})
+}
+
+func FuzzCounterEndpoint(f *testing.F) {
+	seeds := []string{
+		defaultBaseURL,
+		"HTTPS://GENERATIVELANGUAGE.GOOGLEAPIS.COM:443/v1beta/",
+		"http://127.0.0.1:8080/?credential=private#fragment",
+		"https://agent:private@example.com/v1beta",
+		"http://example.com/v1beta",
+		"://bad-endpoint",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		canonical, endpointErr := canonicalCounterEndpoint(input)
+		if endpointErr != nil {
+			if canonical != "" {
+				t.Fatalf("canonical endpoint = %q alongside %v", canonical, endpointErr)
+			}
+			return
+		}
+		parsed, err := url.Parse(canonical)
+		if err != nil {
+			t.Fatalf("canonical endpoint %q does not parse: %v", canonical, err)
+		}
+		if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+			t.Fatalf("canonical endpoint retains unsafe URL metadata: %q", canonical)
+		}
+		if parsed.Path != "" && strings.HasSuffix(parsed.Path, "/") {
+			t.Fatalf("canonical endpoint retains trailing slash: %q", canonical)
+		}
+		again, againErr := canonicalCounterEndpoint(canonical)
+		if againErr != nil || again != canonical {
+			t.Fatalf("canonicalization is not idempotent: first=%q second=%q error=%v", canonical, again, againErr)
 		}
 	})
 }

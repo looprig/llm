@@ -6,6 +6,28 @@ import (
 	"github.com/looprig/inference"
 )
 
+// CounterEndpointReason classifies an endpoint that cannot safely carry a
+// countTokens request. Values never include the rejected endpoint or credentials.
+type CounterEndpointReason string
+
+const (
+	CounterEndpointMalformed         CounterEndpointReason = "malformed endpoint"
+	CounterEndpointMissingHost       CounterEndpointReason = "missing endpoint host"
+	CounterEndpointCredentials       CounterEndpointReason = "endpoint contains credentials"
+	CounterEndpointUnsupportedScheme CounterEndpointReason = "unsupported endpoint scheme"
+	CounterEndpointInsecureTransport CounterEndpointReason = "plaintext endpoint is not loopback"
+)
+
+// CounterEndpointError rejects unsafe counter routing before any request I/O.
+// The raw endpoint is deliberately omitted because it may contain credentials.
+type CounterEndpointError struct {
+	Reason CounterEndpointReason
+}
+
+func (e *CounterEndpointError) Error() string {
+	return "gemini: invalid countTokens endpoint: " + string(e.Reason)
+}
+
 // CounterResponseReason classifies a countTokens response that cannot produce a
 // trustworthy normalized input-token count.
 type CounterResponseReason string
