@@ -6,6 +6,31 @@ import (
 	"github.com/looprig/inference"
 )
 
+// CounterRequestReason classifies failure to build the countTokens envelope
+// from the already encoded complete GenerateContentRequest.
+type CounterRequestReason string
+
+const (
+	CounterRequestGenerateBodyInvalid CounterRequestReason = "generateContentRequest body is not one JSON object"
+	CounterRequestModelEncodingFailed CounterRequestReason = "model resource JSON encoding failed"
+)
+
+// CounterRequestError reports a local countTokens envelope invariant failure.
+// It never carries request bytes or the model name.
+type CounterRequestError struct {
+	Reason CounterRequestReason
+	Err    error
+}
+
+func (e *CounterRequestError) Error() string {
+	if e.Err != nil {
+		return "gemini: build countTokens request: " + string(e.Reason) + ": " + e.Err.Error()
+	}
+	return "gemini: build countTokens request: " + string(e.Reason)
+}
+
+func (e *CounterRequestError) Unwrap() error { return e.Err }
+
 // CounterEndpointReason classifies an endpoint that cannot safely carry a
 // countTokens request. Values never include the rejected endpoint or credentials.
 type CounterEndpointReason string

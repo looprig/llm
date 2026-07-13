@@ -39,24 +39,7 @@ type counterCapturedRequest struct {
 func TestCounterCountContext(t *testing.T) {
 	t.Parallel()
 
-	temperature := 0.25
-	maxTokens := 128
-	req := inference.Request{
-		Model: inference.CustomModel(
-			inference.ProviderName(llm.ProviderGoogle),
-			inference.APIFormatGemini,
-			defaultBaseURL,
-			"publishers/google:prod/models/gemini 2.5",
-			inference.WithTools(),
-			inference.WithSampling(inference.Sampling{Temperature: &temperature, MaxTokens: &maxTokens}),
-		),
-		System: "You are concise.",
-		Messages: content.AgenticMessages{
-			&content.UserMessage{Message: content.Message{Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "hello"}}}},
-			&content.AIMessage{Message: content.Message{Role: content.RoleAssistant, Blocks: []content.Block{&content.TextBlock{Text: "hi"}}}, Usage: &content.Usage{InputTokens: 99, OutputTokens: 1}},
-		},
-		Tools: []inference.Tool{{Name: "lookup", Description: "look up a value", Schema: []byte(`{"type":"object","properties":{"q":{"type":"string"}}}`)}},
-	}
+	req := completeCounterRequest("publishers/google:prod/models/gemini 2.5")
 	wantBody, err := geminicodec.EncodeRequest(req)
 	if err != nil {
 		t.Fatalf("EncodeRequest() error = %v", err)
@@ -130,8 +113,93 @@ func TestCounterCountContext(t *testing.T) {
 			if !ok {
 				t.Fatalf("countTokens request = %s, want generateContentRequest wrapper", wire.body)
 			}
-			if !bytes.Equal(nested, wantBody) {
-				t.Errorf("nested generateContentRequest = %s, want byte-identical complete inference body %s", nested, wantBody)
+			assertCountGenerateRequest(t, nested, wantBody, "models/"+req.Model.Name)
+		})
+	}
+}
+
+func TestCounterCountRequestModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		modelName string
+	}{
+		{name: "ordinary model", modelName: "gemini-2.5-flash"},
+		{name: "resource-like model", modelName: "publishers/google:prod/models/gemini 2.5"},
+		{name: "JSON escaped model", modelName: "gemini-\"quoted\"\\branch<&"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := completeCounterRequest(tt.modelName)
+			codecBody, err := geminicodec.EncodeRequest(req)
+			if err != nil {
+				t.Fatalf("EncodeRequest() error = %v", err)
+			}
+			bodyCh := make(chan []byte, 1)
+			pathCh := make(chan string, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				body, _ := io.ReadAll(request.Body)
+				bodyCh <- body
+				pathCh <- request.URL.EscapedPath()
+				_, _ = io.WriteString(w, `{"totalTokens":1}`)
+			}))
+			defer srv.Close()
+
+			_, err = newCounter(counterTestKey, srv.URL).CountContext(context.Background(), req)
+			if err != nil {
+				t.Fatalf("CountContext() error = %v", err)
+			}
+			if got, want := <-pathCh, "/models/"+url.PathEscape(tt.modelName)+":countTokens"; got != want {
+				t.Errorf("wire route = %q, want %q", got, want)
+			}
+
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(<-bodyCh, &envelope); err != nil {
+				t.Fatalf("countTokens body unmarshal error = %v", err)
+			}
+			if len(envelope) != 1 {
+				t.Fatalf("countTokens wrapper fields = %d, want 1", len(envelope))
+			}
+			nested, ok := envelope["generateContentRequest"]
+			if !ok {
+				t.Fatal("countTokens body lacks generateContentRequest")
+			}
+			assertCountGenerateRequest(t, nested, codecBody, "models/"+tt.modelName)
+		})
+	}
+}
+
+func TestCounterRequestEnvelopeErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "empty body", body: nil},
+		{name: "null body", body: []byte(`null`)},
+		{name: "array body", body: []byte(`[]`)},
+		{name: "scalar body", body: []byte(`"value"`)},
+		{name: "malformed object", body: []byte(`{"contents":`)},
+		{name: "multiple values", body: []byte(`{} {}`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := wrapGenerateContentRequest("model", tt.body)
+			if got != nil {
+				t.Errorf("wrapGenerateContentRequest() = %s on error, want nil", got)
+			}
+			var requestErr *CounterRequestError
+			if !errors.As(err, &requestErr) {
+				t.Fatalf("error = %T, want *CounterRequestError", err)
+			}
+			if requestErr.Reason != CounterRequestGenerateBodyInvalid {
+				t.Errorf("CounterRequestError.Reason = %q, want %q", requestErr.Reason, CounterRequestGenerateBodyInvalid)
 			}
 		})
 	}
@@ -596,6 +664,77 @@ func counterRequest(modelName string) inference.Request {
 		Messages: content.AgenticMessages{
 			&content.UserMessage{Message: content.Message{Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "hello"}}}},
 		},
+	}
+}
+
+func completeCounterRequest(modelName string) inference.Request {
+	temperature := 0.25
+	maxTokens := 128
+	return inference.Request{
+		Model: inference.CustomModel(
+			inference.ProviderName(llm.ProviderGoogle),
+			inference.APIFormatGemini,
+			defaultBaseURL,
+			modelName,
+			inference.WithTools(),
+			inference.WithSampling(inference.Sampling{Temperature: &temperature, MaxTokens: &maxTokens}),
+		),
+		System: "You are concise.",
+		Messages: content.AgenticMessages{
+			&content.UserMessage{Message: content.Message{Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "hello"}}}},
+			&content.AIMessage{Message: content.Message{Role: content.RoleAssistant, Blocks: []content.Block{&content.TextBlock{Text: "hi"}}}, Usage: &content.Usage{InputTokens: 99, OutputTokens: 1}},
+		},
+		Tools: []inference.Tool{{Name: "lookup", Description: "look up a value", Schema: []byte(`{"type":"object","properties":{"q":{"type":"string"}}}`)}},
+	}
+}
+
+func assertCountGenerateRequest(t *testing.T, nested, codecBody []byte, wantModel string) {
+	t.Helper()
+	var nestedFields map[string]json.RawMessage
+	if err := json.Unmarshal(nested, &nestedFields); err != nil {
+		t.Fatalf("generateContentRequest unmarshal error = %v", err)
+	}
+	modelJSON, ok := nestedFields["model"]
+	if !ok {
+		t.Fatal("generateContentRequest lacks model")
+	}
+	var gotModel string
+	if err := json.Unmarshal(modelJSON, &gotModel); err != nil {
+		t.Fatalf("generateContentRequest.model unmarshal error = %v", err)
+	}
+	if gotModel != wantModel {
+		t.Errorf("generateContentRequest.model = %q, want %q", gotModel, wantModel)
+	}
+
+	var codecFields map[string]json.RawMessage
+	if err := json.Unmarshal(codecBody, &codecFields); err != nil {
+		t.Fatalf("codec body unmarshal error = %v", err)
+	}
+	if len(nestedFields) != len(codecFields)+1 {
+		t.Fatalf("generateContentRequest fields = %d, want codec fields %d plus model", len(nestedFields), len(codecFields))
+	}
+	for field, want := range codecFields {
+		got, ok := nestedFields[field]
+		if !ok {
+			t.Errorf("generateContentRequest lost codec field %q", field)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("generateContentRequest field %q = %s, want byte-equivalent %s", field, got, want)
+		}
+	}
+
+	escapedModel, err := json.Marshal(wantModel)
+	if err != nil {
+		t.Fatalf("json.Marshal(model) error = %v", err)
+	}
+	expected := make([]byte, 0, len(codecBody)+len(escapedModel)+10)
+	expected = append(expected, `{"model":`...)
+	expected = append(expected, escapedModel...)
+	expected = append(expected, ',')
+	expected = append(expected, codecBody[1:]...)
+	if !bytes.Equal(nested, expected) {
+		t.Errorf("generateContentRequest bytes = %s, want lossless deterministic merge %s", nested, expected)
 	}
 }
 

@@ -111,15 +111,28 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wrapGenerateContentRequest(generateBody), nil
+	return wrapGenerateContentRequest(req.Model.Name, generateBody)
 }
 
-func wrapGenerateContentRequest(generateBody []byte) []byte {
-	const prefix = `{"generateContentRequest":`
-	body := make([]byte, 0, len(prefix)+len(generateBody)+1)
+func wrapGenerateContentRequest(modelName string, generateBody []byte) ([]byte, error) {
+	object := bytes.TrimSpace(generateBody)
+	if !json.Valid(object) || len(object) < 2 || object[0] != '{' || object[len(object)-1] != '}' {
+		return nil, &CounterRequestError{Reason: CounterRequestGenerateBodyInvalid}
+	}
+	model, err := json.Marshal("models/" + modelName)
+	if err != nil {
+		return nil, &CounterRequestError{Reason: CounterRequestModelEncodingFailed, Err: err}
+	}
+	const prefix = `{"generateContentRequest":{"model":`
+	body := make([]byte, 0, len(prefix)+len(model)+len(object)+2)
 	body = append(body, prefix...)
-	body = append(body, generateBody...)
-	return append(body, '}')
+	body = append(body, model...)
+	if len(bytes.TrimSpace(object[1:len(object)-1])) > 0 {
+		body = append(body, ',')
+	}
+	body = append(body, object[1:]...)
+	body = append(body, '}')
+	return body, nil
 }
 
 func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
