@@ -1,4 +1,4 @@
-package inference
+package model
 
 // Sampling is dialect-neutral sampling intent. Each Codec maps it to its wire mechanism; the
 // dialect-specific validity rules (e.g. Anthropic's Temperature==1.0 for thinking) live in the

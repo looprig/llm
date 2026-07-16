@@ -16,7 +16,7 @@ import (
 	"math/big"
 	"net/http"
 
-	"github.com/looprig/inference"
+	failure "github.com/looprig/inference/failure"
 )
 
 // GPUEvidence is one entry of the per-instance gpu_evidence list returned by a
@@ -61,8 +61,8 @@ func gpuEvidenceNonce(evidenceB64 string) (string, error) {
 //   - *tee.Error{Reason: ReasonNvidiaVerdictInvalid} on any verification
 //     failure (no evidence, bad signature, wrong alg, unknown kid, malformed
 //     token, or verdict false).
-//   - *inference.NetworkError on transport failure.
-//   - *inference.APIError when NRAS or the JWKS endpoint returns a non-2xx status.
+//   - *failure.NetworkError on transport failure.
+//   - *failure.APIError when NRAS or the JWKS endpoint returns a non-2xx status.
 func VerifyGPUEvidence(ctx context.Context, hc *http.Client, nrasURL, jwksURL string, gpu []GPUEvidence) error {
 	if len(gpu) == 0 {
 		return &Error{Reason: ReasonNvidiaVerdictInvalid, Err: errors.New("no gpu evidence")}
@@ -103,18 +103,18 @@ func VerifyGPUEvidence(ctx context.Context, hc *http.Client, nrasURL, jwksURL st
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, nrasURL, bytes.NewReader(reqJSON))
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	httpResp, err := hc.Do(httpReq)
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return apiError(httpResp.StatusCode, respBody)
@@ -194,7 +194,7 @@ func extractNRASToken(respBody []byte) (string, error) {
 // alg-confusion: a token claiming "none"/"HS256" is rejected before any
 // signature work). The signature is the raw 96-byte R||S concatenation, not
 // ASN.1 DER. Verification failures return *tee.Error{ReasonNvidiaVerdictInvalid};
-// JWKS transport failures return *inference.NetworkError / *inference.APIError.
+// JWKS transport failures return *failure.NetworkError / *failure.APIError.
 func verifyEAT(ctx context.Context, hc *http.Client, jwksURL, token string) (map[string]any, error) {
 	bad := func(err error) error { return &Error{Reason: ReasonNvidiaVerdictInvalid, Err: err} }
 
@@ -262,16 +262,16 @@ func nvidiaSigningKey(ctx context.Context, hc *http.Client, jwksURL, kid string)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	httpResp, err := hc.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	jwksBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return nil, apiError(httpResp.StatusCode, jwksBody)
@@ -320,10 +320,10 @@ func nvidiaSigningKey(ctx context.Context, hc *http.Client, jwksURL, kid string)
 	return nil, bad(fmt.Errorf("no JWKS entry for kid %q", kid))
 }
 
-// apiError builds an *inference.APIError from a non-2xx response, best-effort
+// apiError builds a *failure.APIError from a non-2xx response, best-effort
 // extracting a "detail" message from the FastAPI/NRAS error envelope.
 func apiError(status int, body []byte) error {
-	e := &inference.APIError{Status: status, Body: body}
+	e := &failure.APIError{Status: status, Body: body}
 	var env struct {
 		Detail string `json:"detail"`
 	}

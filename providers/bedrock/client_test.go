@@ -13,6 +13,8 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	failure "github.com/looprig/inference/failure"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/auth"
 	"github.com/looprig/llm/providers/bedrock"
@@ -134,8 +136,8 @@ func TestBedrockInvoke(t *testing.T) {
 }
 
 // TestBedrockInvokeErrors covers the mapped failure modes: a non-2xx status maps
-// to *inference.APIError (preserving status + body) and a transport failure (server
-// closes the connection) maps to *inference.NetworkError.
+// to *failure.APIError (preserving status + body) and a transport failure (server
+// closes the connection) maps to *failure.NetworkError.
 func TestBedrockInvokeErrors(t *testing.T) {
 	t.Parallel()
 
@@ -193,9 +195,9 @@ func TestBedrockInvokeErrors(t *testing.T) {
 
 			switch {
 			case tt.wantAPIErr:
-				var apiErr *inference.APIError
+				var apiErr *failure.APIError
 				if !errors.As(err, &apiErr) {
-					t.Fatalf("err = %T, want *inference.APIError", err)
+					t.Fatalf("err = %T, want *failure.APIError", err)
 				}
 				if apiErr.Status != tt.wantAPICode {
 					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tt.wantAPICode)
@@ -204,9 +206,9 @@ func TestBedrockInvokeErrors(t *testing.T) {
 					t.Error("APIError.Body is empty, want the raw provider payload")
 				}
 			case tt.wantNetErr:
-				var netErr *inference.NetworkError
+				var netErr *failure.NetworkError
 				if !errors.As(err, &netErr) {
-					t.Fatalf("err = %T, want *inference.NetworkError", err)
+					t.Fatalf("err = %T, want *failure.NetworkError", err)
 				}
 			}
 		})
@@ -240,8 +242,8 @@ func TestBedrockStreamNotSupported(t *testing.T) {
 }
 
 // TestBedrockPreIOGuards verifies the ordered fail-closed guards run before any
-// network I/O: a non-Bedrock provider is rejected with *inference.ModelMismatchError,
-// and an invalid Model (empty name) with *inference.ValidationError. Neither reaches
+// network I/O: a non-Bedrock provider is rejected with *failure.ModelMismatchError,
+// and an invalid Model (empty name) with *model.ValidationError. Neither reaches
 // the server.
 func TestBedrockPreIOGuards(t *testing.T) {
 	t.Parallel()
@@ -255,7 +257,7 @@ func TestBedrockPreIOGuards(t *testing.T) {
 	}{
 		{
 			name:   "wrong provider is a model mismatch",
-			mutate: func(r *inference.Request) { r.Model.Provider = inference.ProviderName(llm.ProviderChutes) },
+			mutate: func(r *inference.Request) { r.Model.Provider = model.ProviderName(llm.ProviderChutes) },
 			wantMM: true,
 		},
 		{
@@ -292,15 +294,15 @@ func TestBedrockPreIOGuards(t *testing.T) {
 			_, err := c.Invoke(context.Background(), req)
 
 			if tt.wantMM {
-				var mm *inference.ModelMismatchError
+				var mm *failure.ModelMismatchError
 				if !errors.As(err, &mm) {
-					t.Fatalf("err = %T, want *inference.ModelMismatchError", err)
+					t.Fatalf("err = %T, want *failure.ModelMismatchError", err)
 				}
 			}
 			if tt.wantValErr {
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Fatalf("err = %T, want *inference.ValidationError", err)
+					t.Fatalf("err = %T, want *model.ValidationError", err)
 				}
 			}
 			if tt.wantUnsupportedFmt {

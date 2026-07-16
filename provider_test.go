@@ -4,7 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/looprig/inference"
+	auth "github.com/looprig/inference/auth"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 )
 
@@ -36,9 +37,9 @@ func TestProviderRequiresKey(t *testing.T) {
 				t.Errorf("RequiresKey() = %v, want %v", got, tt.want)
 			}
 			if tt.wantErr {
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("error is %T, want *inference.ValidationError", err)
+					t.Errorf("error is %T, want *model.ValidationError", err)
 				}
 			}
 		})
@@ -50,15 +51,15 @@ func TestProviderRequiredAuth(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider llm.Provider
-		want     inference.AuthKind
+		want     auth.AuthKind
 		wantErr  bool
 	}{
-		{name: "lmstudio needs none", provider: llm.ProviderLMStudio, want: inference.AuthNone},
-		{name: "phala needs api key", provider: llm.ProviderPhala, want: inference.AuthAPIKey},
-		{name: "chutes needs api key", provider: llm.ProviderChutes, want: inference.AuthAPIKey},
-		{name: "openrouter needs api key", provider: llm.ProviderOpenRouter, want: inference.AuthAPIKey},
+		{name: "lmstudio needs none", provider: llm.ProviderLMStudio, want: auth.AuthNone},
+		{name: "phala needs api key", provider: llm.ProviderPhala, want: auth.AuthAPIKey},
+		{name: "chutes needs api key", provider: llm.ProviderChutes, want: auth.AuthAPIKey},
+		{name: "openrouter needs api key", provider: llm.ProviderOpenRouter, want: auth.AuthAPIKey},
 		{name: "bedrock needs sigv4", provider: llm.ProviderBedrock, want: llm.AuthSigV4},
-		{name: "google needs api key", provider: llm.ProviderGoogle, want: inference.AuthAPIKey},
+		{name: "google needs api key", provider: llm.ProviderGoogle, want: auth.AuthAPIKey},
 		{name: "empty is error", provider: "", wantErr: true},
 		{name: "unknown is error", provider: "cohere", wantErr: true},
 	}
@@ -70,9 +71,9 @@ func TestProviderRequiredAuth(t *testing.T) {
 				t.Fatalf("RequiredAuth() err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("RequiredAuth() error = %v, want *inference.ValidationError", err)
+					t.Errorf("RequiredAuth() error = %v, want *model.ValidationError", err)
 				}
 			}
 			if got != tt.want {

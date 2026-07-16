@@ -3,7 +3,8 @@ package llm
 import (
 	"fmt"
 
-	"github.com/looprig/inference"
+	auth "github.com/looprig/inference/auth"
+	model "github.com/looprig/inference/model"
 )
 
 // AttestationError is a TEE attestation failure.
@@ -27,17 +28,17 @@ func (e *AttestationError) Error() string {
 func (e *AttestationError) Unwrap() error { return e.Err }
 
 // AuthSigV4 classifies the AWS Signature Version 4 credential a Bedrock provider
-// requires. It is an inference.AuthKind value defined here rather than in inference:
+// requires. It is an auth.AuthKind value defined here rather than in inference:
 // inference owns only the generic credential kinds (AuthNone, AuthAPIKey), while
 // provider-specific request-signing schemes are llm policy.
-const AuthSigV4 inference.AuthKind = "sigv4"
+const AuthSigV4 auth.AuthKind = "sigv4"
 
 // AuthRequiredError is returned by a provider factory when a provider that requires
 // credentials is given none. Fail-closed. Carries no secret. Provider is the llm
 // provider-policy label; Kind is the inference credential kind (including AuthSigV4).
 type AuthRequiredError struct {
 	Provider Provider
-	Kind     inference.AuthKind
+	Kind     auth.AuthKind
 }
 
 func (e *AuthRequiredError) Error() string {
@@ -64,7 +65,7 @@ const (
 type CounterSupportError struct {
 	Provider  Provider
 	Reason    CounterSupportReason
-	APIFormat inference.APIFormat
+	APIFormat model.APIFormat
 }
 
 func (e *CounterSupportError) Error() string {

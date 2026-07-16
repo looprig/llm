@@ -16,6 +16,7 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/e2e"
 	"github.com/looprig/llm/providers/chutes"
@@ -27,10 +28,10 @@ var _ inference.Client = (*chutes.Client)(nil)
 // validChutesModel returns a Model that passes llm.ValidateModel for the chutes
 // provider (OpenAI dialect, https chutes host). Tests that want an invalid Model
 // override one field.
-func validChutesModel(name string) inference.Model {
-	return inference.Model{
-		Provider:  inference.ProviderName(llm.ProviderChutes),
-		APIFormat: inference.APIFormatOpenAI,
+func validChutesModel(name string) model.Model {
+	return model.Model{
+		Provider:  model.ProviderName(llm.ProviderChutes),
+		APIFormat: model.APIFormatOpenAI,
 		BaseURL:   "https://api.chutes.ai",
 		Name:      name,
 	}
@@ -38,14 +39,14 @@ func validChutesModel(name string) inference.Model {
 
 // TestClient_ValidateCalledOnInvoke verifies that model validation is called
 // before any network I/O: an invalid descriptor short-circuits with a
-// *inference.ValidationError, while a valid one proceeds to the (failing) network
+// *model.ValidationError, while a valid one proceeds to the (failing) network
 // call without ever surfacing a ValidationError.
 func TestClient_ValidateCalledOnInvoke(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
-		model   inference.Model
+		model   model.Model
 		wantErr bool
 	}{
 		{
@@ -55,17 +56,17 @@ func TestClient_ValidateCalledOnInvoke(t *testing.T) {
 		},
 		{
 			name:    "invalid: empty model name",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
 			wantErr: true,
 		},
 		{
 			name:    "invalid: unknown provider",
-			model:   inference.Model{Provider: inference.ProviderName("bogus"), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName("bogus"), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 		{
 			name:    "invalid: unsupported api format",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatAnthropic, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatAnthropic, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 	}
@@ -83,9 +84,9 @@ func TestClient_ValidateCalledOnInvoke(t *testing.T) {
 				if err == nil {
 					t.Fatal("Invoke() returned nil error, want ValidationError")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("Invoke() error = %T(%v), want *inference.ValidationError", err, err)
+					t.Errorf("Invoke() error = %T(%v), want *model.ValidationError", err, err)
 				}
 			} else {
 				// Valid spec: Validate passes. The request will fail at the
@@ -96,7 +97,7 @@ func TestClient_ValidateCalledOnInvoke(t *testing.T) {
 				if err == nil {
 					t.Fatal("Invoke() returned nil error against unreachable server")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if errors.As(err, &ve) {
 					t.Errorf("Invoke() returned ValidationError for valid spec: %v", err)
 				}
@@ -112,7 +113,7 @@ func TestClient_ValidateCalledOnStream(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		model   inference.Model
+		model   model.Model
 		wantErr bool
 	}{
 		{
@@ -122,17 +123,17 @@ func TestClient_ValidateCalledOnStream(t *testing.T) {
 		},
 		{
 			name:    "invalid: empty model name",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
 			wantErr: true,
 		},
 		{
 			name:    "invalid: unknown provider",
-			model:   inference.Model{Provider: inference.ProviderName("bogus"), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName("bogus"), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 		{
 			name:    "invalid: unsupported api format",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatAnthropic, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatAnthropic, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 	}
@@ -149,9 +150,9 @@ func TestClient_ValidateCalledOnStream(t *testing.T) {
 				if err == nil {
 					t.Fatal("Stream() returned nil error, want ValidationError")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("Stream() error = %T(%v), want *inference.ValidationError", err, err)
+					t.Errorf("Stream() error = %T(%v), want *model.ValidationError", err, err)
 				}
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -160,7 +161,7 @@ func TestClient_ValidateCalledOnStream(t *testing.T) {
 				if err == nil {
 					t.Fatal("Stream() returned nil error against unreachable server")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if errors.As(err, &ve) {
 					t.Errorf("Stream() returned ValidationError for valid spec: %v", err)
 				}
@@ -307,7 +308,7 @@ func TestClientInvoke(t *testing.T) {
 	t.Parallel()
 
 	const chuteID = "ac059e33-eb27-541c-b9a9-24b214036475"
-	const model = "Qwen/Qwen3-32B-TEE"
+	const modelName = "Qwen/Qwen3-32B-TEE"
 
 	noopAttest := func(_ context.Context, _ interface{}, _ string) error { return nil }
 	_ = noopAttest // used via withAttestFn in internal tests
@@ -334,7 +335,7 @@ func TestClientInvoke(t *testing.T) {
 			t.Parallel()
 
 			enc := newTestEnclave(t, tt.respContent)
-			srv := httptest.NewServer(enc.handler(t, chuteID, model))
+			srv := httptest.NewServer(enc.handler(t, chuteID, modelName))
 			defer srv.Close()
 
 			// We use a bypass attestFn via the test-only withAttestFn hook
@@ -353,7 +354,7 @@ func TestClientInvoke(t *testing.T) {
 			// the internal package tests.
 			c := chutes.New(srv.URL, "testkey", chutes.WithHTTPClient(srv.Client()), chutes.WithLLMBase(srv.URL))
 
-			req := invokeReq(model)
+			req := invokeReq(modelName)
 			// This will fail at attestation (no /instances/ evidence route in
 			// the simple handler), but that's expected. We just verify no panic
 			// and the error is typed.
@@ -363,7 +364,7 @@ func TestClientInvoke(t *testing.T) {
 			// Error is expected (no evidence endpoint) — verify it's typed.
 			if err != nil {
 				// Should be network or API error, not validation error.
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if errors.As(err, &ve) {
 					t.Errorf("Invoke() returned ValidationError for valid request: %v", err)
 				}
@@ -379,7 +380,7 @@ func TestClientInvoke_ValidateShortCircuit(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		model   inference.Model
+		model   model.Model
 		wantErr bool
 	}{
 		{
@@ -389,17 +390,17 @@ func TestClientInvoke_ValidateShortCircuit(t *testing.T) {
 		},
 		{
 			name:    "error path: empty model name",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
 			wantErr: true,
 		},
 		{
 			name:    "error path: unknown provider",
-			model:   inference.Model{Provider: inference.ProviderName("bogus"), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName("bogus"), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 		{
 			name:    "error path: non-loopback http base url",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "http://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "http://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 	}
@@ -416,9 +417,9 @@ func TestClientInvoke_ValidateShortCircuit(t *testing.T) {
 				if err == nil {
 					t.Fatal("Invoke() want error, got nil")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("want *inference.ValidationError, got %T: %v", err, err)
+					t.Errorf("want *model.ValidationError, got %T: %v", err, err)
 				}
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -426,7 +427,7 @@ func TestClientInvoke_ValidateShortCircuit(t *testing.T) {
 				_, err := c.Invoke(ctx, req)
 				// Will fail at network level, which is expected.
 				if err != nil {
-					var ve *inference.ValidationError
+					var ve *model.ValidationError
 					if errors.As(err, &ve) {
 						t.Errorf("Invoke() returned ValidationError for valid spec: %v", err)
 					}
@@ -443,7 +444,7 @@ func TestClientStream_ValidateShortCircuit(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		model   inference.Model
+		model   model.Model
 		wantErr bool
 	}{
 		{
@@ -453,17 +454,17 @@ func TestClientStream_ValidateShortCircuit(t *testing.T) {
 		},
 		{
 			name:    "error path: empty model name",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: ""},
 			wantErr: true,
 		},
 		{
 			name:    "error path: unknown provider",
-			model:   inference.Model{Provider: inference.ProviderName("bogus"), APIFormat: inference.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName("bogus"), APIFormat: model.APIFormatOpenAI, BaseURL: "https://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 		{
 			name:    "error path: non-loopback http base url",
-			model:   inference.Model{Provider: inference.ProviderName(llm.ProviderChutes), APIFormat: inference.APIFormatOpenAI, BaseURL: "http://api.chutes.ai", Name: "test-model"},
+			model:   model.Model{Provider: model.ProviderName(llm.ProviderChutes), APIFormat: model.APIFormatOpenAI, BaseURL: "http://api.chutes.ai", Name: "test-model"},
 			wantErr: true,
 		},
 	}
@@ -480,16 +481,16 @@ func TestClientStream_ValidateShortCircuit(t *testing.T) {
 				if err == nil {
 					t.Fatal("Stream() want error, got nil")
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Errorf("want *inference.ValidationError, got %T: %v", err, err)
+					t.Errorf("want *model.ValidationError, got %T: %v", err, err)
 				}
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 				defer cancel()
 				_, err := c.Stream(ctx, req)
 				if err != nil {
-					var ve *inference.ValidationError
+					var ve *model.ValidationError
 					if errors.As(err, &ve) {
 						t.Errorf("Stream() returned ValidationError for valid spec: %v", err)
 					}
@@ -506,7 +507,7 @@ func TestClientStream_FullRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	const chuteID = "ac059e33-eb27-541c-b9a9-24b214036475"
-	const model = "Qwen/Qwen3-32B-TEE"
+	const modelName = "Qwen/Qwen3-32B-TEE"
 
 	openAIChunk := func(text string) string {
 		return `{"choices":[{"index":0,"delta":{"content":"` + text + `"}}]}`
@@ -557,7 +558,7 @@ func TestClientStream_FullRoundTrip(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/v1/models":
-					body := `{"data":[{"id":"` + model + `","chute_id":"` + chuteID + `"}]}`
+					body := `{"data":[{"id":"` + modelName + `","chute_id":"` + chuteID + `"}]}`
 					_, _ = w.Write([]byte(body))
 
 				case strings.HasPrefix(r.URL.Path, "/e2e/instances/"):
@@ -638,14 +639,14 @@ func TestClientStream_FullRoundTrip(t *testing.T) {
 			// to fail (no /instances/.../evidence route). So we just verify
 			// Stream doesn't panic on valid model spec and the error is typed.
 			c := chutes.New(srv.URL, "testkey", chutes.WithHTTPClient(srv.Client()), chutes.WithLLMBase(srv.URL))
-			req := inference.Request{Model: validChutesModel(model)}
+			req := inference.Request{Model: validChutesModel(modelName)}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
 			_, err = c.Stream(ctx, req)
 			if err != nil {
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if errors.As(err, &ve) {
 					t.Errorf("Stream() returned ValidationError for valid request: %v", err)
 				}

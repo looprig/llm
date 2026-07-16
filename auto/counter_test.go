@@ -4,8 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
+	contextcount "github.com/looprig/inference/contextcount"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
 )
@@ -15,7 +17,7 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 	tests := []struct {
 		name          string
 		provider      llm.Provider
-		model         inference.Model
+		model         model.Model
 		key           auth.APIKey
 		wantGoogle    bool
 		wantDirect    bool
@@ -25,35 +27,35 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 		{
 			name:          "phala openai has no exact counter",
 			provider:      llm.ProviderPhala,
-			model:         counterModel(llm.ProviderPhala, inference.APIFormatOpenAI, "https://api.phala.network/v1"),
+			model:         counterModel(llm.ProviderPhala, model.APIFormatOpenAI, "https://api.phala.network/v1"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportExactUnavailable,
 		},
 		{
 			name:          "chutes openai has no exact counter",
 			provider:      llm.ProviderChutes,
-			model:         counterModel(llm.ProviderChutes, inference.APIFormatOpenAI, "https://api.chutes.ai"),
+			model:         counterModel(llm.ProviderChutes, model.APIFormatOpenAI, "https://api.chutes.ai"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportExactUnavailable,
 		},
 		{
 			name:          "openrouter openai has no exact counter",
 			provider:      llm.ProviderOpenRouter,
-			model:         counterModel(llm.ProviderOpenRouter, inference.APIFormatOpenAI, "https://openrouter.ai/api/v1"),
+			model:         counterModel(llm.ProviderOpenRouter, model.APIFormatOpenAI, "https://openrouter.ai/api/v1"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportExactUnavailable,
 		},
 		{
 			name:       "google exact counter",
 			provider:   llm.ProviderGoogle,
-			model:      counterModel(llm.ProviderGoogle, inference.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta"),
+			model:      counterModel(llm.ProviderGoogle, model.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta"),
 			key:        "google-test-key",
 			wantGoogle: true,
 		},
 		{
 			name:       "bedrock exact counter requires direct construction",
 			provider:   llm.ProviderBedrock,
-			model:      counterModel(llm.ProviderBedrock, inference.APIFormatAnthropic, ""),
+			model:      counterModel(llm.ProviderBedrock, model.APIFormatAnthropic, ""),
 			wantDirect: true,
 		},
 		{
@@ -66,14 +68,14 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 		{
 			name:          "lmstudio openai has no provider exact counter",
 			provider:      llm.ProviderLMStudio,
-			model:         counterModel(llm.ProviderLMStudio, inference.APIFormatOpenAI, "http://localhost:1234/v1"),
+			model:         counterModel(llm.ProviderLMStudio, model.APIFormatOpenAI, "http://localhost:1234/v1"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportExactUnavailable,
 		},
 		{
 			name:          "lmstudio anthropic has no provider exact counter",
 			provider:      llm.ProviderLMStudio,
-			model:         counterModel(llm.ProviderLMStudio, inference.APIFormatAnthropic, "http://localhost:1234/v1"),
+			model:         counterModel(llm.ProviderLMStudio, model.APIFormatAnthropic, "http://localhost:1234/v1"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportExactUnavailable,
 		},
@@ -89,7 +91,7 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 				if _, ok := got.(*geminiprovider.Counter); !ok {
 					t.Fatalf("NewCounter() = %T, want *gemini.Counter", got)
 				}
-				if got.CounterCapability().Quality != inference.CountQualityExactProvider {
+				if got.CounterCapability().Quality != contextcount.CountQualityExactProvider {
 					t.Errorf("CounterCapability().Quality = %v, want exact provider", got.CounterCapability().Quality)
 				}
 				return
@@ -125,7 +127,7 @@ func TestNewCounterOrderedErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name           string
-		model          inference.Model
+		model          model.Model
 		key            auth.APIKey
 		wantValidation bool
 		wantAuth       bool
@@ -134,35 +136,35 @@ func TestNewCounterOrderedErrors(t *testing.T) {
 	}{
 		{
 			name:           "unknown provider validates before support",
-			model:          counterModel(llm.Provider("future"), inference.APIFormatOpenAI, "https://future.example.test"),
+			model:          counterModel(llm.Provider("future"), model.APIFormatOpenAI, "https://future.example.test"),
 			key:            "key",
 			wantValidation: true,
 		},
 		{
 			name:           "self contradictory known provider validates before support",
-			model:          counterModel(llm.ProviderGoogle, inference.APIFormatOpenAI, "https://generativelanguage.googleapis.com/v1beta"),
+			model:          counterModel(llm.ProviderGoogle, model.APIFormatOpenAI, "https://generativelanguage.googleapis.com/v1beta"),
 			key:            "key",
 			wantValidation: true,
 		},
 		{
 			name:           "empty model validates before support",
-			model:          inference.Model{},
+			model:          model.Model{},
 			key:            "key",
 			wantValidation: true,
 		},
 		{
 			name:     "google support reaches auth validation",
-			model:    counterModel(llm.ProviderGoogle, inference.APIFormatGemini, ""),
+			model:    counterModel(llm.ProviderGoogle, model.APIFormatGemini, ""),
 			wantAuth: true,
 		},
 		{
 			name:        "unsupported keyed provider reports support before missing key",
-			model:       counterModel(llm.ProviderChutes, inference.APIFormatOpenAI, ""),
+			model:       counterModel(llm.ProviderChutes, model.APIFormatOpenAI, ""),
 			wantSupport: true,
 		},
 		{
 			name:       "bedrock reports direct construction independent of api key",
-			model:      counterModel(llm.ProviderBedrock, inference.APIFormatAnthropic, ""),
+			model:      counterModel(llm.ProviderBedrock, model.APIFormatAnthropic, ""),
 			wantDirect: true,
 		},
 	}
@@ -176,14 +178,14 @@ func TestNewCounterOrderedErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("NewCounter() error = nil, want typed error")
 			}
-			var validationErr *inference.ValidationError
+			var validationErr *model.ValidationError
 			var authErr *llm.AuthRequiredError
 			var supportErr *llm.CounterSupportError
 			var directErr *llm.CounterDirectConstructionError
 			if errors.As(err, &validationErr) != tt.wantValidation || errors.As(err, &authErr) != tt.wantAuth || errors.As(err, &supportErr) != tt.wantSupport || errors.As(err, &directErr) != tt.wantDirect {
 				t.Errorf("NewCounter() error = %T; validation=%v auth=%v support=%v direct=%v", err, errors.As(err, &validationErr), errors.As(err, &authErr), errors.As(err, &supportErr), errors.As(err, &directErr))
 			}
-			if tt.wantAuth && (authErr.Provider != llm.ProviderGoogle || authErr.Kind != inference.AuthAPIKey) {
+			if tt.wantAuth && (authErr.Provider != llm.ProviderGoogle || authErr.Kind != auth.AuthAPIKey) {
 				t.Errorf("AuthRequiredError = %+v, want google API-key requirement", authErr)
 			}
 		})
@@ -195,7 +197,7 @@ func TestResolveCounterDialects(t *testing.T) {
 	tests := []struct {
 		name           string
 		provider       llm.Provider
-		apiFormat      inference.APIFormat
+		apiFormat      model.APIFormat
 		key            auth.APIKey
 		wantGoogle     bool
 		wantDirect     bool
@@ -206,21 +208,21 @@ func TestResolveCounterDialects(t *testing.T) {
 		{
 			name:       "google gemini constructs exact counter",
 			provider:   llm.ProviderGoogle,
-			apiFormat:  inference.APIFormatGemini,
+			apiFormat:  model.APIFormatGemini,
 			key:        "google-test-key",
 			wantGoogle: true,
 		},
 		{
 			name:          "future google dialect fails closed",
 			provider:      llm.ProviderGoogle,
-			apiFormat:     inference.APIFormat("future-google-dialect"),
+			apiFormat:     model.APIFormat("future-google-dialect"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportAPIFormatUnavailable,
 		},
 		{
 			name:       "bedrock anthropic directs construction",
 			provider:   llm.ProviderBedrock,
-			apiFormat:  inference.APIFormatAnthropic,
+			apiFormat:  model.APIFormatAnthropic,
 			wantDirect: true,
 		},
 		{
@@ -233,13 +235,13 @@ func TestResolveCounterDialects(t *testing.T) {
 		{
 			name:           "unknown provider fails closed",
 			provider:       llm.Provider("future-provider"),
-			apiFormat:      inference.APIFormat("future-dialect"),
+			apiFormat:      model.APIFormat("future-dialect"),
 			wantValidation: true,
 		},
 		{
 			name:          "future bedrock dialect fails closed",
 			provider:      llm.ProviderBedrock,
-			apiFormat:     inference.APIFormat("future-bedrock-dialect"),
+			apiFormat:     model.APIFormat("future-bedrock-dialect"),
 			wantSupport:   true,
 			supportReason: llm.CounterSupportAPIFormatUnavailable,
 		},
@@ -261,9 +263,9 @@ func TestResolveCounterDialects(t *testing.T) {
 				t.Fatalf("resolveCounter() = %T alongside error, want nil", got)
 			}
 			if tt.wantValidation {
-				var validationErr *inference.ValidationError
+				var validationErr *model.ValidationError
 				if !errors.As(err, &validationErr) {
-					t.Fatalf("resolveCounter() error = %T, want *inference.ValidationError", err)
+					t.Fatalf("resolveCounter() error = %T, want *model.ValidationError", err)
 				}
 				if validationErr.Field != "Provider" {
 					t.Errorf("ValidationError.Field = %q, want Provider", validationErr.Field)
@@ -293,6 +295,6 @@ func TestResolveCounterDialects(t *testing.T) {
 	}
 }
 
-func counterModel(provider llm.Provider, format inference.APIFormat, baseURL string) inference.Model {
-	return inference.CustomModel(inference.ProviderName(provider), format, baseURL, "counter-test-model")
+func counterModel(provider llm.Provider, format model.APIFormat, baseURL string) model.Model {
+	return model.CustomModel(model.ProviderName(provider), format, baseURL, "counter-test-model")
 }

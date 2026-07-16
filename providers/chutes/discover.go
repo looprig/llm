@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/looprig/inference"
+	failure "github.com/looprig/inference/failure"
 )
 
 // mlkemPubKeySize is the raw byte length of an ML-KEM-768 encapsulation key
@@ -31,25 +31,25 @@ type instance struct {
 
 // discoverInstances does GET {baseURL}/e2e/instances/{chuteID} with a Bearer
 // token and parses the response (WIRE.md section 5). Transport failures return
-// *inference.NetworkError; a non-2xx status returns *inference.APIError; an empty
+// *failure.NetworkError; a non-2xx status returns *failure.APIError; an empty
 // instance list or a pubkey that does not decode to 1184 bytes returns an error.
 func discoverInstances(ctx context.Context, hc *http.Client, baseURL, apiKey, chuteID string) ([]instance, error) {
 	url := baseURL + "/e2e/instances/" + chuteID
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	httpResp, err := hc.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return nil, apiError(httpResp.StatusCode, respBody)
@@ -83,10 +83,10 @@ func discoverInstances(ctx context.Context, hc *http.Client, baseURL, apiKey, ch
 	return out, nil
 }
 
-// apiError builds an *inference.APIError from a non-2xx response, best-effort
+// apiError builds a *failure.APIError from a non-2xx response, best-effort
 // extracting a "detail" message from the Chutes/FastAPI error envelope.
 func apiError(status int, body []byte) error {
-	e := &inference.APIError{Status: status, Body: body}
+	e := &failure.APIError{Status: status, Body: body}
 	var env struct {
 		Detail string `json:"detail"`
 	}

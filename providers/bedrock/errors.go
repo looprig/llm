@@ -3,7 +3,7 @@ package bedrock
 import (
 	"fmt"
 
-	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 )
 
 // UnsupportedAPIFormatError is a fail-closed rejection, before any I/O, of a
@@ -15,15 +15,15 @@ import (
 // request — keeps the client from "silently doing less" than its declared contract.
 // Carries the offending format so callers can branch via errors.As.
 type UnsupportedAPIFormatError struct {
-	APIFormat inference.APIFormat
+	APIFormat model.APIFormat
 }
 
 func (e *UnsupportedAPIFormatError) Error() string {
-	return fmt.Sprintf("bedrock: API format %q is not implemented; this client encodes only the Anthropic dialect (%q)", e.APIFormat, inference.APIFormatAnthropic)
+	return fmt.Sprintf("bedrock: API format %q is not implemented; this client encodes only the Anthropic dialect (%q)", e.APIFormat, model.APIFormatAnthropic)
 }
 
 // RequestBuildError is a failure to CONSTRUCT the outbound HTTP request (a
-// malformed endpoint/URL), kept distinct from *inference.NetworkError (reserved for
+// malformed endpoint/URL), kept distinct from *failure.NetworkError (reserved for
 // transport failures out of hc.Do) so errors.As never misclassifies a config bug
 // as a transport fault. Unwrap exposes the net/http cause.
 type RequestBuildError struct {

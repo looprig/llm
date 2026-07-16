@@ -34,9 +34,12 @@ import (
 	"time"
 
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/codec/openaiapi"
+	failure "github.com/looprig/inference/failure"
+	stream "github.com/looprig/inference/stream"
 	"github.com/looprig/inference/wire/sse"
 )
 
@@ -92,11 +95,11 @@ type httpDoer interface {
 //
 // Connection-binding note (fail-safe asymmetry): unlike the generic
 // transport.Client — which binds one Endpoint and rejects a request whose
-// Model.Provider/BaseURL differs with a pre-I/O *inference.ModelMismatchError — this
+// Model.Provider/BaseURL differs with a pre-I/O *failure.ModelMismatchError — this
 // client binds its gateway endpoint at construction (New's baseURL) and enforces
 // model identity per request via TEE attestation. A provider/endpoint mismatch
 // therefore surfaces as an *AttestationError (attestation cannot succeed against
-// the wrong model/gateway), not an *inference.ModelMismatchError. This is fail-safe:
+// the wrong model/gateway), not a *failure.ModelMismatchError. This is fail-safe:
 // the request is never sent when the check fails; only the error type differs.
 type Client struct {
 	baseURL string
@@ -321,7 +324,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 // Stream runs the buffer-until-verified flow for a streaming chat request. It
 // buffers the FULL sealed SSE response, opens + verifies it (receipt signature +
 // request body_hash + wire_hash + upstream + the E2EE-authenticated open of every
-// delta), and ONLY THEN returns a *inference.StreamReader replaying the already-verified
+// delta), and ONLY THEN returns a *stream.StreamReader replaying the already-verified
 // opened deltas. On ANY failure it returns a typed error and a NIL reader, so the
 // caller observes ZERO chunks — no unverified delta is ever observable.
 //
@@ -330,7 +333,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 // gateway hashed for cleartext_hash, so it cannot reconstruct that preimage.
 // wire_hash (over the exact wire bytes) plus the per-delta AEAD open — each delta
 // AAD-bound to the attested gateway — carry content authenticity instead.
-func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.StreamReader[content.Chunk], error) {
+func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
 	if err := req.Model.Validate(); err != nil {
 		return nil, err
 	}
@@ -412,13 +415,13 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 	return newReplayReader(chunks, result, hasResult), nil
 }
 
-// newReplayReader builds a *inference.StreamReader that replays pre-built,
+// newReplayReader builds a *stream.StreamReader that replays pre-built,
 // already-verified chunks and publishes their codec result at EOF. Next returns
 // each chunk in order and (nil, io.EOF) once exhausted; Close is a no-op (the wire
 // response was fully buffered and closed during Stream, so there is no underlying
 // connection to release). The cursor is closed over locally, so a fresh reader is
 // independent.
-func newReplayReader(chunks []content.Chunk, result inference.StreamResult, hasResult bool) *inference.StreamReader[content.Chunk] {
+func newReplayReader(chunks []content.Chunk, result stream.StreamResult, hasResult bool) *stream.StreamReader[content.Chunk] {
 	i := 0
 	next := func() (content.Chunk, error) {
 		if i >= len(chunks) {
@@ -428,10 +431,10 @@ func newReplayReader(chunks []content.Chunk, result inference.StreamResult, hasR
 		i++
 		return chunk, nil
 	}
-	produceResult := func() (inference.StreamResult, bool, error) {
+	produceResult := func() (stream.StreamResult, bool, error) {
 		return result, hasResult, nil
 	}
-	return inference.NewStreamReaderWithResult(next, nil, produceResult)
+	return stream.NewStreamReaderWithResult(next, nil, produceResult)
 }
 
 // bodyKeyDelta is the streaming chunk's per-choice sealed-field container: the
@@ -492,7 +495,7 @@ func openStreamDeltas(wireBytes []byte, clientPriv *secp256k1.PrivateKey, model,
 // codec used by ordinary provider streams. The wire bytes remain internal until
 // the receipt has been verified; only then does Stream attach this snapshot to
 // the verified replay reader.
-func collectStreamResult(wireBytes []byte) (inference.StreamResult, bool, error) {
+func collectStreamResult(wireBytes []byte) (stream.StreamResult, bool, error) {
 	reader := openaiapi.NewStream(io.NopCloser(bytes.NewReader(wireBytes)))
 	for {
 		_, err := reader.Next()
@@ -502,14 +505,14 @@ func collectStreamResult(wireBytes []byte) (inference.StreamResult, bool, error)
 		if err != nil {
 			closeErr := reader.Close()
 			if closeErr != nil {
-				return inference.StreamResult{}, false, &streamParseError{reason: "usage stream decode and close failed", cause: errors.Join(err, closeErr)}
+				return stream.StreamResult{}, false, &streamParseError{reason: "usage stream decode and close failed", cause: errors.Join(err, closeErr)}
 			}
-			return inference.StreamResult{}, false, err
+			return stream.StreamResult{}, false, err
 		}
 	}
 	result, ok := reader.Result()
 	if err := reader.Close(); err != nil {
-		return inference.StreamResult{}, false, &streamParseError{reason: "usage stream close failed", cause: err}
+		return stream.StreamResult{}, false, &streamParseError{reason: "usage stream close failed", cause: err}
 	}
 	return result, ok, nil
 }
@@ -595,8 +598,8 @@ func stringField(obj *Object, field string) (string, bool) {
 // postInference POSTs the sealed body to /v1/chat/completions with the E2EE
 // headers, the bearer token, and the JSON content type, then reads the FULL
 // response body (the receipt wire-hash preimage) and the x-receipt-id header. A
-// transport failure returns *inference.NetworkError; a non-2xx status returns
-// *inference.APIError; neither carries the API key.
+// transport failure returns *failure.NetworkError; a non-2xx status returns
+// *failure.APIError; neither carries the API key.
 func (c *Client) postInference(ctx context.Context, sealed *sealedRequest) ([]byte, string, error) {
 	endpoint, err := c.endpointURL(pathChatCompletions, nil)
 	if err != nil {
@@ -605,7 +608,7 @@ func (c *Client) postInference(ctx context.Context, sealed *sealedRequest) ([]by
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(sealed.Body))
 	if err != nil {
-		return nil, "", &inference.NetworkError{Err: err}
+		return nil, "", &failure.NetworkError{Err: err}
 	}
 	for k, v := range sealed.Headers {
 		httpReq.Header.Set(k, v)
@@ -615,16 +618,16 @@ func (c *Client) postInference(ctx context.Context, sealed *sealedRequest) ([]by
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, "", &inference.NetworkError{Err: err}
+		return nil, "", &failure.NetworkError{Err: err}
 	}
 	defer resp.Body.Close()
 
 	body, err := readAllLimited(resp.Body)
 	if err != nil {
-		return nil, "", &inference.NetworkError{Err: err}
+		return nil, "", &failure.NetworkError{Err: err}
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, "", &inference.APIError{
+		return nil, "", &failure.APIError{
 			Status:  resp.StatusCode,
 			Message: "aci inference request failed",
 			Body:    body,
@@ -635,7 +638,7 @@ func (c *Client) postInference(ctx context.Context, sealed *sealedRequest) ([]by
 
 // fetchReceipt GETs the receipt by id from /v1/aci/receipts/{id} with the bearer
 // token and returns the raw receipt JSON. A transport failure returns
-// *inference.NetworkError; a non-2xx status returns *inference.APIError.
+// *failure.NetworkError; a non-2xx status returns *failure.APIError.
 func (c *Client) fetchReceipt(ctx context.Context, receiptID string) ([]byte, error) {
 	if receiptID == "" {
 		return nil, &receiptFetchError{reason: "response carried no x-receipt-id header"}
@@ -647,22 +650,22 @@ func (c *Client) fetchReceipt(ctx context.Context, receiptID string) ([]byte, er
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	defer resp.Body.Close()
 
 	body, err := readAllLimited(resp.Body)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, &inference.APIError{
+		return nil, &failure.APIError{
 			Status:  resp.StatusCode,
 			Message: "aci receipt fetch failed",
 			Body:    body,
@@ -691,22 +694,22 @@ func (c *Client) attestModel(ctx context.Context, model string) (*VerifiedReport
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, attestErr(reasonQuoteInvalid, &inference.NetworkError{Err: err})
+		return nil, attestErr(reasonQuoteInvalid, &failure.NetworkError{Err: err})
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, attestErr(reasonQuoteInvalid, &inference.NetworkError{Err: err})
+		return nil, attestErr(reasonQuoteInvalid, &failure.NetworkError{Err: err})
 	}
 	defer resp.Body.Close()
 
 	reportJSON, err := readAllLimited(resp.Body)
 	if err != nil {
-		return nil, attestErr(reasonQuoteInvalid, &inference.NetworkError{Err: err})
+		return nil, attestErr(reasonQuoteInvalid, &failure.NetworkError{Err: err})
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, attestErr(reasonQuoteInvalid, &inference.APIError{
+		return nil, attestErr(reasonQuoteInvalid, &failure.APIError{
 			Status:  resp.StatusCode,
 			Message: "aci attestation fetch failed",
 			Body:    reportJSON,

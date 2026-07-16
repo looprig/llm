@@ -1,4 +1,4 @@
-package inference
+package auth
 
 import (
 	"context"

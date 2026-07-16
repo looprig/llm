@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/looprig/core/content"
-	"github.com/looprig/inference"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm/e2e"
 )
 
@@ -134,7 +134,7 @@ func TestChatStreamUsageResult(t *testing.T) {
 				if errors.Is(terminalErr, io.EOF) {
 					t.Fatal("Next() error = EOF, want malformed-usage error")
 				}
-				assertUsageNormalization(t, terminalErr, inference.UsageNormalizationFieldInputTokens)
+				assertUsageNormalization(t, terminalErr, usage.UsageNormalizationFieldInputTokens)
 				if _, ok := reader.Result(); ok {
 					t.Fatal("Result() after error = present, want unavailable")
 				}
@@ -182,15 +182,15 @@ func chutesEvent(t *testing.T, value map[string]string) string {
 	return "data: " + string(payload) + "\n\n"
 }
 
-func assertUsageNormalization(t *testing.T, err error, field inference.UsageNormalizationField) {
+func assertUsageNormalization(t *testing.T, err error, field usage.UsageNormalizationField) {
 	t.Helper()
-	var usageErr *inference.UsageNormalizationError
+	var usageErr *usage.UsageNormalizationError
 	if !errors.As(err, &usageErr) {
-		t.Fatalf("error = %T (%v), want *inference.UsageNormalizationError", err, err)
+		t.Fatalf("error = %T (%v), want *usage.UsageNormalizationError", err, err)
 	}
-	if usageErr.Field != field || usageErr.Reason != inference.UsageNormalizationReasonNegative {
+	if usageErr.Field != field || usageErr.Reason != usage.UsageNormalizationReasonNegative {
 		t.Errorf("UsageNormalizationError = {Field:%q Reason:%q}, want {Field:%q Reason:%q}",
-			usageErr.Field, usageErr.Reason, field, inference.UsageNormalizationReasonNegative)
+			usageErr.Field, usageErr.Reason, field, usage.UsageNormalizationReasonNegative)
 	}
 }
 

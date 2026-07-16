@@ -6,37 +6,41 @@ import (
 
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
+	codec "github.com/looprig/inference/codec"
 	"github.com/looprig/inference/codec/anthropicapi"
 	"github.com/looprig/inference/codec/geminiapi"
 	"github.com/looprig/inference/codec/openaiapi"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/transport"
+
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
 )
 
 // The helpers below stand in for the deleted model catalogue: each returns a valid
-// Model (OriginCustom) via inference.CustomModel, used purely as a test fixture. They
+// Model (OriginCustom) via model.CustomModel, used purely as a test fixture. They
 // keep the repeated model rows DRY across this file's dispatch tables.
-func chutesKimiK2Model() inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderChutes), inference.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 128_000}), inference.WithTools(), inference.WithThinking())
+func chutesKimiK2Model() model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderChutes), model.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", model.WithContextLimits(model.ContextLimits{WindowTokens: 128_000}), model.WithTools(), model.WithThinking())
 }
 
-func openRouterModel(name string) inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderOpenRouter), inference.APIFormatOpenAI, "https://openrouter.ai/api/v1", name, inference.WithTools())
+func openRouterModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, "https://openrouter.ai/api/v1", name, model.WithTools())
 }
 
-func geminiFlashModel() inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderGoogle), inference.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 1_000_000}), inference.WithTools(), inference.WithImages(), inference.WithThinking())
+func geminiFlashModel() model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderGoogle), model.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash", model.WithContextLimits(model.ContextLimits{WindowTokens: 1_000_000}), model.WithTools(), model.WithImages(), model.WithThinking())
 }
 
-func lmStudioLocalModel(name string) inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderLMStudio), inference.APIFormatOpenAI, "http://localhost:1234/v1", name, inference.WithTools())
+func lmStudioLocalModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderLMStudio), model.APIFormatOpenAI, "http://localhost:1234/v1", name, model.WithTools())
 }
 
 // TestNew exercises the dispatch + fail-closed auth contract: valid models build a
 // non-nil client, an unknown/self-contradictory model is rejected before dispatch
-// with a *inference.ValidationError, and a key-requiring provider given no key fails
+// with a *model.ValidationError, and a key-requiring provider given no key fails
 // closed with a *llm.AuthRequiredError. LM Studio (AuthNone) succeeds with no key.
 func TestNew(t *testing.T) {
 	t.Parallel()
@@ -44,10 +48,10 @@ func TestNew(t *testing.T) {
 		name string
 		// model is built from catalog rows / CustomModel so validation passes on the
 		// happy cases; the error cases deliberately fail an earlier ordered guard.
-		model       inference.Model
+		model       model.Model
 		key         auth.APIKey
 		wantErr     bool
-		wantAuthReq bool   // when wantErr: expect *llm.AuthRequiredError, else *inference.ValidationError
+		wantAuthReq bool   // when wantErr: expect *llm.AuthRequiredError, else *model.ValidationError
 		wantField   string // when set (ValidationError path): assert ValidationError.Field
 	}{
 		{name: "chutes with key", model: chutesKimiK2Model(), key: "k"},
@@ -55,20 +59,20 @@ func TestNew(t *testing.T) {
 		{name: "google with key", model: geminiFlashModel(), key: "AIza-k"},
 		{name: "lmstudio without key (AuthNone)", model: lmStudioLocalModel("qwen"), key: ""},
 		{name: "lmstudio ignores a supplied key", model: lmStudioLocalModel("qwen"), key: "k"},
-		{name: "phala empty key fails closed", model: inference.CustomModel(inference.ProviderName(llm.ProviderPhala), inference.APIFormatOpenAI, "https://api.phala.network/v1", "zai-org/GLM-4.6", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithThinking()), key: "", wantErr: true, wantAuthReq: true},
+		{name: "phala empty key fails closed", model: model.CustomModel(model.ProviderName(llm.ProviderPhala), model.APIFormatOpenAI, "https://api.phala.network/v1", "zai-org/GLM-4.6", model.WithContextLimits(model.ContextLimits{WindowTokens: 200_000}), model.WithTools(), model.WithThinking()), key: "", wantErr: true, wantAuthReq: true},
 		{name: "chutes empty key fails closed", model: chutesKimiK2Model(), key: "", wantErr: true, wantAuthReq: true},
 		{name: "openrouter empty key fails closed", model: openRouterModel("x"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "google empty key fails closed", model: geminiFlashModel(), key: "", wantErr: true, wantAuthReq: true},
 		{
 			name:    "unknown provider rejected before dispatch",
-			model:   inference.Model{Provider: "nope", APIFormat: inference.APIFormatOpenAI, BaseURL: "https://x.example.test", Name: "m"},
+			model:   model.Model{Provider: "nope", APIFormat: model.APIFormatOpenAI, BaseURL: "https://x.example.test", Name: "m"},
 			key:     "k",
 			wantErr: true,
 		},
-		{name: "empty model rejected", model: inference.Model{}, key: "k", wantErr: true},
+		{name: "empty model rejected", model: model.Model{}, key: "k", wantErr: true},
 		{
 			name:    "self-contradictory model rejected before dispatch",
-			model:   inference.CustomModel(inference.ProviderName(llm.ProviderPhala), inference.APIFormatAnthropic, "https://api.phala.network/v1", "m"),
+			model:   model.CustomModel(model.ProviderName(llm.ProviderPhala), model.APIFormatAnthropic, "https://api.phala.network/v1", "m"),
 			key:     "k",
 			wantErr: true,
 		},
@@ -78,7 +82,7 @@ func TestNew(t *testing.T) {
 			// anthropicapi codec into codecFor, so this now resolves a real codec and
 			// succeeds instead of erroring.
 			name:  "lmstudio+anthropic now succeeds (anthropic codec wired)",
-			model: inference.CustomModel(inference.ProviderName(llm.ProviderLMStudio), inference.APIFormatAnthropic, "http://localhost:1234", "m"),
+			model: model.CustomModel(model.ProviderName(llm.ProviderLMStudio), model.APIFormatAnthropic, "http://localhost:1234", "m"),
 			key:   "",
 		},
 	}
@@ -102,14 +106,14 @@ func TestNew(t *testing.T) {
 					if are.Provider != llm.Provider(tt.model.Provider) {
 						t.Errorf("AuthRequiredError.Provider = %q, want %q", are.Provider, tt.model.Provider)
 					}
-					if are.Kind != inference.AuthAPIKey {
-						t.Errorf("AuthRequiredError.Kind = %q, want %q", are.Kind, inference.AuthAPIKey)
+					if are.Kind != auth.AuthAPIKey {
+						t.Errorf("AuthRequiredError.Kind = %q, want %q", are.Kind, auth.AuthAPIKey)
 					}
 					return
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Fatalf("err = %T, want *inference.ValidationError", err)
+					t.Fatalf("err = %T, want *model.ValidationError", err)
 				}
 				if tt.wantField != "" && ve.Field != tt.wantField {
 					t.Errorf("ValidationError.Field = %q, want %q", ve.Field, tt.wantField)
@@ -133,7 +137,7 @@ func TestNewBedrockDirectsToConstructor(t *testing.T) {
 
 	// An empty key must NOT surface as an AuthRequiredError here: bedrock's auth
 	// kind is SigV4, not APIKey, so the Phase-1 empty-APIKey guard is skipped.
-	got, err := New(inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", "anthropic.claude-3-5-sonnet-20241022-v2:0", inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithImages()), "")
+	got, err := New(model.CustomModel(model.ProviderName(llm.ProviderBedrock), model.APIFormatAnthropic, "", "anthropic.claude-3-5-sonnet-20241022-v2:0", model.WithContextLimits(model.ContextLimits{WindowTokens: 200_000}), model.WithTools(), model.WithImages()), "")
 	if got != nil {
 		t.Fatalf("New() returned non-nil client (%T) for a SigV4 provider", got)
 	}
@@ -163,7 +167,7 @@ func TestNewBedrockDirectsToConstructor(t *testing.T) {
 // cannot be built here; a defaulted policy would fail open.
 func TestNewPhalaNotConstructible(t *testing.T) {
 	t.Parallel()
-	m := inference.CustomModel(inference.ProviderName(llm.ProviderPhala), inference.APIFormatOpenAI, "https://inference.phala.com", "zai-org/GLM-4.6")
+	m := model.CustomModel(model.ProviderName(llm.ProviderPhala), model.APIFormatOpenAI, "https://inference.phala.com", "zai-org/GLM-4.6")
 	got, err := New(m, "sk-live")
 	if got != nil {
 		t.Fatalf("New() returned non-nil client (%T) for a policy-requiring provider", got)
@@ -197,7 +201,7 @@ func TestNewConcreteTypes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		model inference.Model
+		model model.Model
 		key   auth.APIKey
 		is    func(inference.Client) bool
 		want  string
@@ -244,37 +248,37 @@ func TestNewConcreteTypes(t *testing.T) {
 
 // TestCodecFor pins the codec-selection registry: each wire dialect auto can encode
 // resolves to its concrete codec, and a format with no codec yet fails closed with a
-// *inference.ValidationError (Field "APIFormat") rather than silently mis-encoding.
+// *model.ValidationError (Field "APIFormat") rather than silently mis-encoding.
 // This is the internal seam that makes lmstudio+anthropic and OpenRouter+openai work.
 func TestCodecFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		format  inference.APIFormat
-		is      func(inference.Codec) bool
+		format  model.APIFormat
+		is      func(codec.Codec) bool
 		want    string
 		wantErr bool
 	}{
 		{
 			name:   "openai",
-			format: inference.APIFormatOpenAI,
-			is:     func(c inference.Codec) bool { _, ok := c.(openaiapi.Codec); return ok },
+			format: model.APIFormatOpenAI,
+			is:     func(c codec.Codec) bool { _, ok := c.(openaiapi.Codec); return ok },
 			want:   "openaiapi.Codec",
 		},
 		{
 			name:   "anthropic",
-			format: inference.APIFormatAnthropic,
-			is:     func(c inference.Codec) bool { _, ok := c.(anthropicapi.Codec); return ok },
+			format: model.APIFormatAnthropic,
+			is:     func(c codec.Codec) bool { _, ok := c.(anthropicapi.Codec); return ok },
 			want:   "anthropicapi.Codec",
 		},
 		{
 			name:   "gemini",
-			format: inference.APIFormatGemini,
-			is:     func(c inference.Codec) bool { _, ok := c.(geminiapi.Codec); return ok },
+			format: model.APIFormatGemini,
+			is:     func(c codec.Codec) bool { _, ok := c.(geminiapi.Codec); return ok },
 			want:   "geminiapi.Codec",
 		},
 		{name: "bedrock-converse has no codec yet", format: llm.APIFormatBedrockConverse, wantErr: true},
-		{name: "unknown format fails closed", format: inference.APIFormat("bogus"), wantErr: true},
+		{name: "unknown format fails closed", format: model.APIFormat("bogus"), wantErr: true},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -288,9 +292,9 @@ func TestCodecFor(t *testing.T) {
 				if got != nil {
 					t.Fatalf("codecFor(%q) returned non-nil codec (%T) alongside an error", tt.format, got)
 				}
-				var ve *inference.ValidationError
+				var ve *model.ValidationError
 				if !errors.As(err, &ve) {
-					t.Fatalf("codecFor err = %T, want *inference.ValidationError", err)
+					t.Fatalf("codecFor err = %T, want *model.ValidationError", err)
 				}
 				if ve.Field != "APIFormat" {
 					t.Errorf("ValidationError.Field = %q, want %q", ve.Field, "APIFormat")

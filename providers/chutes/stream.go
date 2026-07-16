@@ -13,8 +13,9 @@ import (
 	"sync"
 
 	"github.com/looprig/core/content"
-	"github.com/looprig/inference"
 	"github.com/looprig/inference/codec/openaiapi"
+	failure "github.com/looprig/inference/failure"
+	stream "github.com/looprig/inference/stream"
 	"github.com/looprig/llm/e2e"
 )
 
@@ -32,7 +33,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 	nonce, ok := sess.popNonce()
 	if !ok {
 		c.dropSession(chuteID)
-		return nil, &inference.APIError{Status: http.StatusForbidden, Message: "nonce exhausted"}
+		return nil, &failure.APIError{Status: http.StatusForbidden, Message: "nonce exhausted"}
 	}
 
 	mlkemCT, blob, err := e2e.Seal(plaintext, sess.key, []byte("e2e-req-v1"), true)
@@ -43,7 +44,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBase+"/e2e/invoke", bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("X-Chute-Id", chuteID)
@@ -56,7 +57,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		defer httpResp.Body.Close()
@@ -70,13 +71,13 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 	ct := httpResp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "text/event-stream") {
 		defer httpResp.Body.Close()
-		return nil, &inference.APIError{Status: httpResp.StatusCode, Message: "expected text/event-stream, got " + ct}
+		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: "expected text/event-stream, got " + ct}
 	}
 	return httpResp, nil
 }
 
 // chatStream sends a streaming e2e chat request and returns a
-// *inference.StreamReader[content.Chunk] over the decrypted deltas. The returned
+// *stream.StreamReader[content.Chunk] over the decrypted deltas. The returned
 // reader MUST be Closed by the caller; Close stops the internal reader goroutine
 // and closes the upstream response.
 //
@@ -95,7 +96,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 //
 // It never leaks: every pump return path runs the deferred body close, while a
 // caller Close eagerly closes both pipe and body to interrupt blocked I/O.
-func (c *Client) chatStream(ctx context.Context, chuteID string, sess *attestedSession, plaintext []byte, respDK *mlkem.DecapsulationKey768) (*inference.StreamReader[content.Chunk], error) {
+func (c *Client) chatStream(ctx context.Context, chuteID string, sess *attestedSession, plaintext []byte, respDK *mlkem.DecapsulationKey768) (*stream.StreamReader[content.Chunk], error) {
 	httpResp, err := c.invokeStream(ctx, chuteID, sess, plaintext, respDK)
 	if err != nil {
 		return nil, err
@@ -159,7 +160,7 @@ func (c *Client) pump(ctx context.Context, body io.ReadCloser, respDK *mlkem.Dec
 				closeErr(ctx.Err())
 				return
 			}
-			closeErr(&inference.NetworkError{Err: err})
+			closeErr(&failure.NetworkError{Err: err})
 			return
 		}
 
@@ -206,7 +207,7 @@ func (c *Client) pump(ctx context.Context, body io.ReadCloser, respDK *mlkem.Dec
 			}
 
 		case ev.Error != nil:
-			closeErr(&inference.APIError{Status: 0, Message: "chutes stream e2e_error: " + string(ev.Error), Body: ev.Error})
+			closeErr(&failure.APIError{Status: 0, Message: "chutes stream e2e_error: " + string(ev.Error), Body: ev.Error})
 			return
 
 		case ev.Usage != nil:

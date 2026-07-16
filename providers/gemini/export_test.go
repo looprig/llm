@@ -1,6 +1,8 @@
 package gemini
 
-import "github.com/looprig/inference/auth"
+import (
+	"github.com/looprig/inference/auth"
+)
 
 // NewWithEndpoint is a test-only constructor that overrides the Gemini endpoint
 // base so Invoke and Stream can be exercised against an httptest.Server. It reuses

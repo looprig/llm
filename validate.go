@@ -3,12 +3,12 @@ package llm
 import (
 	"fmt"
 
-	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 )
 
 // ValidateModel is the fail-closed provider-policy preset that layers the
-// known-provider truth table on top of inference.Model's structural validation.
-// inference.Model.Validate is deliberately provider-policy-free (it only checks a
+// known-provider truth table on top of model.Model's structural validation.
+// model.Model.Validate is deliberately provider-policy-free (it only checks a
 // non-empty Name and a syntactically safe non-empty BaseURL); this preset adds the
 // checks inference dropped:
 //
@@ -20,19 +20,19 @@ import (
 //     required.
 //
 // It reproduces the pre-split harness Model.Validate behavior, returning a
-// *inference.ValidationError on the first rule violated. OriginCustom models
+// *model.ValidationError on the first rule violated. OriginCustom models
 // validate identically to catalog rows; the lower trust in a custom model's Caps is
 // a downstream gating concern, not this preset's.
-func ValidateModel(m inference.Model) error {
+func ValidateModel(m model.Model) error {
 	p := Provider(m.Provider)
 
 	// RequiredAuth is the canonical provider registry: it errors on any provider not
 	// yet classified there, which is exactly "unknown provider" here.
 	if _, err := p.RequiredAuth(); err != nil {
-		return &inference.ValidationError{Field: "Provider", Reason: fmt.Sprintf("unknown provider %q", m.Provider)}
+		return &model.ValidationError{Field: "Provider", Reason: fmt.Sprintf("unknown provider %q", m.Provider)}
 	}
 	if !p.supportsAPIFormat(m.APIFormat) {
-		return &inference.ValidationError{
+		return &model.ValidationError{
 			Field:  "APIFormat",
 			Reason: fmt.Sprintf("provider %q does not support API format %q", m.Provider, m.APIFormat),
 		}
@@ -50,7 +50,7 @@ func ValidateModel(m inference.Model) error {
 	// endpoint", valid only for a provider that supplies one (or region-routed
 	// Bedrock). Fail-closed for any provider with no default.
 	if m.BaseURL == "" && !p.allowsEmptyBaseURL() {
-		return &inference.ValidationError{Field: "BaseURL", Reason: "must not be empty"}
+		return &model.ValidationError{Field: "BaseURL", Reason: "must not be empty"}
 	}
 	return nil
 }

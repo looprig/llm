@@ -1,4 +1,4 @@
-package inference
+package model
 
 // APIFormat names the wire dialect a model endpoint speaks. It is an OPEN label: inference
 // carries built-in constant names for the bundled codecs/routes, but the type is deliberately

@@ -3,7 +3,7 @@ package llm
 import (
 	"testing"
 
-	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 )
 
 func TestProviderAllowsEmptyBaseURL(t *testing.T) {
@@ -36,22 +36,22 @@ func TestProviderSupportsAPIFormat(t *testing.T) {
 	tests := []struct {
 		name string
 		p    Provider
-		f    inference.APIFormat
+		f    model.APIFormat
 		want bool
 	}{
-		{"phala openai", ProviderPhala, inference.APIFormatOpenAI, true},
-		{"phala anthropic no", ProviderPhala, inference.APIFormatAnthropic, false},
-		{"chutes openai", ProviderChutes, inference.APIFormatOpenAI, true},
-		{"openrouter openai", ProviderOpenRouter, inference.APIFormatOpenAI, true},
-		{"lmstudio openai", ProviderLMStudio, inference.APIFormatOpenAI, true},
-		{"lmstudio anthropic", ProviderLMStudio, inference.APIFormatAnthropic, true},
+		{"phala openai", ProviderPhala, model.APIFormatOpenAI, true},
+		{"phala anthropic no", ProviderPhala, model.APIFormatAnthropic, false},
+		{"chutes openai", ProviderChutes, model.APIFormatOpenAI, true},
+		{"openrouter openai", ProviderOpenRouter, model.APIFormatOpenAI, true},
+		{"lmstudio openai", ProviderLMStudio, model.APIFormatOpenAI, true},
+		{"lmstudio anthropic", ProviderLMStudio, model.APIFormatAnthropic, true},
 		{"lmstudio bedrock no", ProviderLMStudio, APIFormatBedrockConverse, false},
-		{"bedrock anthropic", ProviderBedrock, inference.APIFormatAnthropic, true},
+		{"bedrock anthropic", ProviderBedrock, model.APIFormatAnthropic, true},
 		{"bedrock converse", ProviderBedrock, APIFormatBedrockConverse, true},
-		{"bedrock openai no", ProviderBedrock, inference.APIFormatOpenAI, false},
-		{"google gemini", ProviderGoogle, inference.APIFormatGemini, true},
-		{"google openai no", ProviderGoogle, inference.APIFormatOpenAI, false},
-		{"unknown supports nothing", Provider("nope"), inference.APIFormatOpenAI, false},
+		{"bedrock openai no", ProviderBedrock, model.APIFormatOpenAI, false},
+		{"google gemini", ProviderGoogle, model.APIFormatGemini, true},
+		{"google openai no", ProviderGoogle, model.APIFormatOpenAI, false},
+		{"unknown supports nothing", Provider("nope"), model.APIFormatOpenAI, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

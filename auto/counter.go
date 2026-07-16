@@ -1,8 +1,10 @@
 package auto
 
 import (
-	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
+	contextcount "github.com/looprig/inference/contextcount"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
 )
@@ -17,7 +19,7 @@ import (
 // mistaken for a supported counter with a missing key. Google is the only exact
 // counter constructible from these inputs; its constructor performs the final
 // fail-closed API-key validation.
-func NewCounter(model inference.Model, key auth.APIKey) (inference.ContextCounter, error) {
+func NewCounter(model model.Model, key auth.APIKey) (contextcount.ContextCounter, error) {
 	if err := llm.ValidateModel(model); err != nil {
 		return nil, err
 	}
@@ -27,10 +29,10 @@ func NewCounter(model inference.Model, key auth.APIKey) (inference.ContextCounte
 // resolveCounter classifies an already validated provider/dialect pair. Keeping
 // dialect dispatch explicit here makes registry expansion fail closed even before
 // ValidateModel is updated to admit a new provider format.
-func resolveCounter(provider llm.Provider, apiFormat inference.APIFormat, key auth.APIKey) (inference.ContextCounter, error) {
+func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.APIKey) (contextcount.ContextCounter, error) {
 	switch provider {
 	case llm.ProviderGoogle:
-		if apiFormat != inference.APIFormatGemini {
+		if apiFormat != model.APIFormatGemini {
 			return nil, &llm.CounterSupportError{
 				Provider:  provider,
 				Reason:    llm.CounterSupportAPIFormatUnavailable,
@@ -39,7 +41,7 @@ func resolveCounter(provider llm.Provider, apiFormat inference.APIFormat, key au
 		}
 		return geminiprovider.NewCounter(key)
 	case llm.ProviderBedrock:
-		if apiFormat == inference.APIFormatAnthropic {
+		if apiFormat == model.APIFormatAnthropic {
 			return nil, &llm.CounterDirectConstructionError{
 				Provider: provider,
 				Reason:   llm.CounterDirectConstructionNeedsSigV4,
@@ -61,6 +63,6 @@ func resolveCounter(provider llm.Provider, apiFormat inference.APIFormat, key au
 		// ValidateModel rejects every provider not in llm's canonical registry.
 		// Keep the default fail-closed so a future registry expansion cannot
 		// accidentally acquire a counter or estimator through fallthrough.
-		return nil, &inference.ValidationError{Field: "Provider", Reason: "context counter support is unclassified"}
+		return nil, &model.ValidationError{Field: "Provider", Reason: "context counter support is unclassified"}
 	}
 }

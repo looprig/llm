@@ -30,7 +30,7 @@ func chutesReason(r tee.Reason) AttestReason {
 
 // wrapTeeErr lifts a *tee.Error returned by llm/tee into a chutes
 // *llm.AttestationError so chutes callers can keep their existing errors.As
-// branches. Any non-tee.Error (e.g. *inference.NetworkError, *inference.APIError)
+// branches. Any non-tee.Error (e.g. *failure.NetworkError, *failure.APIError)
 // is returned unchanged.
 func wrapTeeErr(err error) error {
 	var te *tee.Error

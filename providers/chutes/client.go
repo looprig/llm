@@ -19,6 +19,8 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	failure "github.com/looprig/inference/failure"
+	stream "github.com/looprig/inference/stream"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/e2e"
 )
@@ -50,12 +52,12 @@ const sessionTTL = 50 * time.Second
 //
 // Connection-binding note (fail-safe asymmetry): unlike the generic
 // transport.Client — which binds one Endpoint and rejects a request whose
-// Model.Provider/BaseURL differs with a pre-I/O *inference.ModelMismatchError —
+// Model.Provider/BaseURL differs with a pre-I/O *failure.ModelMismatchError —
 // this client binds its gateway endpoints at construction (New's apiBase/llmBase)
 // and enforces model identity per request via NVIDIA TEE attestation. A
 // provider/endpoint mismatch therefore surfaces as an attestation failure
 // (attestation cannot bind to the wrong model/instance), not an
-// *inference.ModelMismatchError. This is fail-safe: the request is never sent when
+// *failure.ModelMismatchError. This is fail-safe: the request is never sent when
 // the check fails; only the error type differs.
 type Client struct {
 	http    *http.Client
@@ -199,10 +201,10 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 }
 
 // Stream sends a streaming e2e chat request and returns a
-// *inference.StreamReader[content.Chunk] over the decrypted deltas.
+// *stream.StreamReader[content.Chunk] over the decrypted deltas.
 // It calls llm.ValidateModel(req.Model) before any network I/O — fail closed.
 // The returned reader MUST be Closed by the caller.
-func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.StreamReader[content.Chunk], error) {
+func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
 	if err := llm.ValidateModel(req.Model); err != nil {
 		return nil, err
 	}
@@ -231,7 +233,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 // invoke seals the plaintext to the session's instance key, POSTs it to
 // /e2e/invoke with the exact wire headers, and returns the raw response body on
 // 200 or the status+body otherwise. A transport failure returns
-// *inference.NetworkError.
+// *failure.NetworkError.
 func (c *Client) invoke(ctx context.Context, chuteID string, sess *attestedSession, plaintext []byte) (respBody []byte, status int, errBody []byte, err error) {
 	nonce, ok := sess.popNonce()
 	if !ok {
@@ -248,7 +250,7 @@ func (c *Client) invoke(ctx context.Context, chuteID string, sess *attestedSessi
 	url := c.apiBase + "/e2e/invoke"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, 0, nil, &inference.NetworkError{Err: err}
+		return nil, 0, nil, &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("X-Chute-Id", chuteID)
@@ -260,12 +262,12 @@ func (c *Client) invoke(ctx context.Context, chuteID string, sess *attestedSessi
 
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, 0, nil, &inference.NetworkError{Err: err}
+		return nil, 0, nil, &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, 0, nil, &inference.NetworkError{Err: err}
+		return nil, 0, nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode != http.StatusOK {
 		return nil, httpResp.StatusCode, body, nil
@@ -277,7 +279,7 @@ func (c *Client) invoke(ctx context.Context, chuteID string, sess *attestedSessi
 // retryable codes (403+"nonce", 410, 426) carry plaintext signal bodies the
 // server picks BEFORE encrypting, so they are inspected as-is. The default
 // branch passes the error body through tryDecryptErrorBody so the surfaced
-// *inference.APIError carries the real upstream error rather than ciphertext.
+// *failure.APIError carries the real upstream error rather than ciphertext.
 func (c *Client) recover(ctx context.Context, chuteID string, status int, body []byte, respDK *mlkem.DecapsulationKey768) (*attestedSession, error) {
 	switch {
 	case status == http.StatusForbidden && bytes.Contains(body, []byte("nonce")):
@@ -293,7 +295,7 @@ func (c *Client) recover(ctx context.Context, chuteID string, status int, body [
 
 // resolveChute maps a model name to its chute UUID, caching the result. On a
 // miss it lists /v1/models from llmBase and finds the matching id. Transport
-// failures return *inference.NetworkError; non-2xx returns *inference.APIError; an
+// failures return *failure.NetworkError; non-2xx returns *failure.APIError; an
 // unknown model returns a plain error.
 func (c *Client) resolveChute(ctx context.Context, model string) (string, error) {
 	c.mu.Lock()
@@ -306,18 +308,18 @@ func (c *Client) resolveChute(ctx context.Context, model string) (string, error)
 	url := c.llmBase + "/v1/models"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", &inference.NetworkError{Err: err}
+		return "", &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", &inference.NetworkError{Err: err}
+		return "", &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return "", &inference.NetworkError{Err: err}
+		return "", &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return "", apiError(httpResp.StatusCode, body)
@@ -360,18 +362,18 @@ func (c *Client) defaultAttest(ctx context.Context, inst instance, chuteID strin
 	url := c.apiBase + "/instances/" + inst.id + "/evidence?nonce=" + nonceHex
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return apiError(httpResp.StatusCode, body)

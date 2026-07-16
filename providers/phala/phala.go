@@ -10,6 +10,7 @@ package phala
 import (
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/aci"
 )
@@ -32,7 +33,7 @@ const defaultBaseURL = "https://inference.phala.com"
 // returns the inference.Client aci implements.
 func New(baseURL string, key auth.APIKey, p aci.Policy) (inference.Client, error) {
 	if key == "" {
-		return nil, &llm.AuthRequiredError{Provider: llm.ProviderPhala, Kind: inference.AuthAPIKey}
+		return nil, &llm.AuthRequiredError{Provider: llm.ProviderPhala, Kind: auth.AuthAPIKey}
 	}
 	if baseURL == "" {
 		baseURL = defaultBaseURL

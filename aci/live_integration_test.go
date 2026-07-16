@@ -33,6 +33,7 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 )
 
@@ -68,9 +69,9 @@ func liveKey(t *testing.T) string {
 // and a single one-line user text message.
 func liveRequest() inference.Request {
 	return inference.Request{
-		Model: inference.Model{
-			Provider:  inference.ProviderName(llm.ProviderPhala),
-			APIFormat: inference.APIFormatOpenAI,
+		Model: model.Model{
+			Provider:  model.ProviderName(llm.ProviderPhala),
+			APIFormat: model.APIFormatOpenAI,
 			BaseURL:   livePhalaBaseURL,
 			Name:      liveModel,
 		},

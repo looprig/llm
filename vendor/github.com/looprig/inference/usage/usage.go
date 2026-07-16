@@ -1,4 +1,4 @@
-package inference
+package usage
 
 import "github.com/looprig/core/content"
 

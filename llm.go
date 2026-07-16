@@ -10,7 +10,7 @@ package llm
 // Provider names the concrete backend an llm/auto factory dispatches on. Unknown
 // values are rejected by ValidateModel; a provider constructor additionally
 // enforces each provider's auth requirement. It is the provider-policy analogue
-// of the opaque inference.ProviderName label: inference carries no provider
+// of the opaque model.ProviderName label: inference carries no provider
 // constants, no auth requirements, and no default endpoints — those live here.
 type Provider string
 

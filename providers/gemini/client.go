@@ -21,7 +21,12 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	failure "github.com/looprig/inference/failure"
+
+	codec "github.com/looprig/inference/codec"
 	geminicodec "github.com/looprig/inference/codec/geminiapi"
+	model "github.com/looprig/inference/model"
+	stream "github.com/looprig/inference/stream"
 	"github.com/looprig/llm"
 )
 
@@ -51,7 +56,7 @@ const (
 	acceptSSE       = "text/event-stream"
 
 	// maxAPIErrorBodyBytes bounds provider-controlled diagnostic payloads while
-	// retaining a useful prefix in inference.APIError.
+	// retaining a useful prefix in failure.APIError.
 	maxAPIErrorBodyBytes = 1 << 20
 )
 
@@ -71,10 +76,10 @@ const (
 // (the x-goog-api-key header) and one http.Client, and is safe for concurrent use
 // (both are immutable after construction). Binding is by provider: a request whose
 // Model.Provider is not ProviderGoogle is rejected pre-I/O with
-// *inference.ModelMismatchError. The endpoint base is fixed at construction.
+// *failure.ModelMismatchError. The endpoint base is fixed at construction.
 type Client struct {
 	endpoint string // scheme://host[/v1beta] base; New binds the Gemini default
-	auth     inference.Authenticator
+	auth     auth.Authenticator
 	codec    geminicodec.Codec
 	hc       *http.Client
 }
@@ -84,7 +89,7 @@ type Client struct {
 // created — matching the auto.New credential contract for an AuthAPIKey provider.
 func New(key auth.APIKey) (inference.Client, error) {
 	if key == "" {
-		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGoogle, Kind: inference.AuthAPIKey}
+		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGoogle, Kind: auth.AuthAPIKey}
 	}
 	return newClient(key, defaultBaseURL), nil
 }
@@ -126,7 +131,7 @@ func newHTTPClient() *http.Client {
 // ctx-bound POST to <base>/models/<name>:generateContent, set the x-goog-api-key
 // header, do, map transport/non-2xx failures, and decode the Gemini response.
 func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.Response, error) {
-	body, err := c.preflight(req, inference.RequestModeInvoke)
+	body, err := c.preflight(req, codec.RequestModeInvoke)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +146,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 
 	httpResp, err := c.hc.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	if httpResp.StatusCode/100 != 2 {
@@ -149,7 +154,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	}
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	return c.codec.DecodeResponse(respBody)
 }
@@ -158,12 +163,12 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 // that de-frames the SSE body and decodes each event via the shared codec. The body
 // is identical to Invoke's (Gemini streaming is an endpoint + ?alt=sse concern, not
 // a body field). Same ordered pre-I/O guards. A non-2xx status maps to
-// *inference.APIError (body drained + closed first); on 2xx the codec's DecodeStream
+// *failure.APIError (body drained + closed first); on 2xx the codec's DecodeStream
 // takes ownership of the response body and closes it via the returned reader's Close.
 // Gemini SSE has no [DONE] sentinel — the sse framer returns io.EOF at body end,
 // which the reader surfaces normally.
-func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.StreamReader[content.Chunk], error) {
-	body, err := c.preflight(req, inference.RequestModeStream)
+func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
+	body, err := c.preflight(req, codec.RequestModeStream)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +183,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 
 	httpResp, err := c.hc.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
 		defer httpResp.Body.Close()
@@ -201,14 +206,14 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*inference.
 // (4) the Gemini body encode. No I/O happens here, so a guard failure never opens a
 // connection. The mode is accepted for call-site symmetry; the Gemini body is
 // mode-independent (streaming is an endpoint/query concern), so it is not consulted.
-func (c *Client) preflight(req inference.Request, _ inference.RequestMode) ([]byte, error) {
+func (c *Client) preflight(req inference.Request, _ codec.RequestMode) ([]byte, error) {
 	if err := c.checkBinding(req.Model); err != nil {
 		return nil, err
 	}
 	if err := llm.ValidateModel(req.Model); err != nil {
 		return nil, err
 	}
-	if req.Model.APIFormat != inference.APIFormatGemini {
+	if req.Model.APIFormat != model.APIFormatGemini {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
 	return geminicodec.EncodeRequest(req)
@@ -217,10 +222,10 @@ func (c *Client) preflight(req inference.Request, _ inference.RequestMode) ([]by
 // checkBinding fails closed when the request's Model names a provider other than
 // Google, before any I/O. The endpoint base is fixed at construction, so the
 // enforceable binding is the provider.
-func (c *Client) checkBinding(m inference.Model) error {
+func (c *Client) checkBinding(m model.Model) error {
 	if llm.Provider(m.Provider) != llm.ProviderGoogle {
-		return &inference.ModelMismatchError{
-			BoundProvider:   inference.ProviderName(llm.ProviderGoogle),
+		return &failure.ModelMismatchError{
+			BoundProvider:   model.ProviderName(llm.ProviderGoogle),
 			RequestProvider: m.Provider,
 			BoundEndpoint:   c.endpoint,
 			RequestEndpoint: m.BaseURL,
@@ -257,7 +262,7 @@ func buildRequest(ctx context.Context, endpoint, modelName, method, query string
 func providerAPIError(response *http.Response) error {
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxAPIErrorBodyBytes))
 	if err != nil {
-		return &inference.NetworkError{Err: err}
+		return &failure.NetworkError{Err: err}
 	}
-	return &inference.APIError{Status: response.StatusCode, Message: string(body), Body: body}
+	return &failure.APIError{Status: response.StatusCode, Message: string(body), Body: body}
 }

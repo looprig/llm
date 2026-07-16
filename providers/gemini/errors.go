@@ -3,7 +3,7 @@ package gemini
 import (
 	"fmt"
 
-	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 )
 
 // CounterStateReason classifies an unusable Counter or CountContext boundary.
@@ -137,15 +137,15 @@ func (e *CounterResponseError) Unwrap() error { return e.Err }
 // Gemini-encoding a request it does not understand. Carries the offending format so
 // callers can branch via errors.As.
 type UnsupportedAPIFormatError struct {
-	APIFormat inference.APIFormat
+	APIFormat model.APIFormat
 }
 
 func (e *UnsupportedAPIFormatError) Error() string {
-	return fmt.Sprintf("gemini: API format %q is not implemented; this client encodes only the Gemini dialect (%q)", e.APIFormat, inference.APIFormatGemini)
+	return fmt.Sprintf("gemini: API format %q is not implemented; this client encodes only the Gemini dialect (%q)", e.APIFormat, model.APIFormatGemini)
 }
 
 // RequestBuildError is a failure to CONSTRUCT the outbound HTTP request (a
-// malformed endpoint/URL), kept distinct from *inference.NetworkError (reserved for
+// malformed endpoint/URL), kept distinct from *failure.NetworkError (reserved for
 // transport failures out of hc.Do) so errors.As never misclassifies a config bug
 // as a transport fault. Unwrap exposes the net/http cause.
 type RequestBuildError struct {

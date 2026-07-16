@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/looprig/core/content"
-	"github.com/looprig/inference"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm/providers/gemini"
 )
 
@@ -103,12 +103,12 @@ func TestGeminiStreamUsageResult(t *testing.T) {
 
 func assertGeminiUsageNormalization(t *testing.T, err error) {
 	t.Helper()
-	var usageErr *inference.UsageNormalizationError
+	var usageErr *usage.UsageNormalizationError
 	if !errors.As(err, &usageErr) {
-		t.Fatalf("error = %T (%v), want *inference.UsageNormalizationError", err, err)
+		t.Fatalf("error = %T (%v), want *usage.UsageNormalizationError", err, err)
 	}
-	if usageErr.Field != inference.UsageNormalizationFieldInputTokens || usageErr.Reason != inference.UsageNormalizationReasonNegative {
+	if usageErr.Field != usage.UsageNormalizationFieldInputTokens || usageErr.Reason != usage.UsageNormalizationReasonNegative {
 		t.Errorf("UsageNormalizationError = {Field:%q Reason:%q}, want {Field:%q Reason:%q}",
-			usageErr.Field, usageErr.Reason, inference.UsageNormalizationFieldInputTokens, inference.UsageNormalizationReasonNegative)
+			usageErr.Field, usageErr.Reason, usage.UsageNormalizationFieldInputTokens, usage.UsageNormalizationReasonNegative)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 )
 
@@ -36,26 +37,26 @@ func TestModelAPIFormatSelectsCodecEndToEnd(t *testing.T) {
 
 	cases := []struct {
 		name             string
-		format           inference.APIFormat
+		format           model.APIFormat
 		wantContentKind  byte // first byte of messages[0].content: '"' string (openai) or '[' array (anthropic)
 		wantMaxTokensKey bool
 	}{
 		{
 			name:             "openai format selects the chat-completions codec",
-			format:           inference.APIFormatOpenAI,
+			format:           model.APIFormatOpenAI,
 			wantContentKind:  '"',
 			wantMaxTokensKey: false,
 		},
 		{
 			name:             "anthropic format selects the messages codec",
-			format:           inference.APIFormatAnthropic,
+			format:           model.APIFormatAnthropic,
 			wantContentKind:  '[',
 			wantMaxTokensKey: true,
 		},
 	}
 
 	// Populated by the (sequential, non-parallel) subtests below, then cross-checked.
-	bodies := make(map[inference.APIFormat][]byte)
+	bodies := make(map[model.APIFormat][]byte)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,8 +79,8 @@ func TestModelAPIFormatSelectsCodecEndToEnd(t *testing.T) {
 	// The single decisive assertion: one identical Request, two APIFormats, two
 	// DIFFERENT wire bodies. If APIFormat were ignored (a single hardwired codec)
 	// these would be byte-identical.
-	if bytes.Equal(bodies[inference.APIFormatOpenAI], bodies[inference.APIFormatAnthropic]) {
-		t.Fatalf("APIFormat did not change the wire body; both encoded to:\n%s", bodies[inference.APIFormatOpenAI])
+	if bytes.Equal(bodies[model.APIFormatOpenAI], bodies[model.APIFormatAnthropic]) {
+		t.Fatalf("APIFormat did not change the wire body; both encoded to:\n%s", bodies[model.APIFormatOpenAI])
 	}
 }
 
@@ -87,7 +88,7 @@ func TestModelAPIFormatSelectsCodecEndToEnd(t *testing.T) {
 // via auto.New, and Invokes it against a throwaway server that records the POST
 // body. The decoded response (and any Invoke error) is intentionally ignored: the
 // assertion target is the encoded REQUEST, captured before the server replies.
-func captureRequestBody(t *testing.T, format inference.APIFormat, msgs content.AgenticMessages) []byte {
+func captureRequestBody(t *testing.T, format model.APIFormat, msgs content.AgenticMessages) []byte {
 	t.Helper()
 	bodyCh := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func captureRequestBody(t *testing.T, format inference.APIFormat, msgs content.A
 
 	// httptest listens on 127.0.0.1, so the http:// BaseURL clears Model.Validate's
 	// loopback exception; LM Studio (AuthNone) needs no key.
-	model := inference.CustomModel(inference.ProviderName(llm.ProviderLMStudio), format, srv.URL, "local-model")
+	model := model.CustomModel(model.ProviderName(llm.ProviderLMStudio), format, srv.URL, "local-model")
 	client, err := New(model, "")
 	if err != nil {
 		t.Fatalf("New(LMStudio, %q) err = %v, want nil", format, err)

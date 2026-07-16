@@ -18,14 +18,19 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	failure "github.com/looprig/inference/failure"
+
 	geminicodec "github.com/looprig/inference/codec/geminiapi"
+	contextcount "github.com/looprig/inference/contextcount"
+	model "github.com/looprig/inference/model"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 )
 
 const (
 	// counterTokenizerRevision pins both the provider count method and the API
 	// revision whose request encoding is used.
-	counterTokenizerRevision inference.TokenizerRevision = "google-gemini-countTokens-v1beta"
+	counterTokenizerRevision contextcount.TokenizerRevision = "google-gemini-countTokens-v1beta"
 	// googleSecurityPolicyRevision identifies the provider endpoint's
 	// secret-free transport/auth policy. It deliberately excludes the RPC method,
 	// tokenizer, credential, and retention metadata so inference and counting on
@@ -41,21 +46,21 @@ const (
 type Counter struct {
 	endpoint    string
 	endpointErr *CounterEndpointError
-	auth        inference.Authenticator
+	auth        auth.Authenticator
 	hc          requestDoer
 	timeout     time.Duration
 }
 
-var _ inference.ContextCounter = (*Counter)(nil)
+var _ contextcount.ContextCounter = (*Counter)(nil)
 
 type requestDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
 // NewCounter constructs an exact provider counter authenticated with key.
-func NewCounter(key auth.APIKey) (inference.ContextCounter, error) {
+func NewCounter(key auth.APIKey) (contextcount.ContextCounter, error) {
 	if key == "" {
-		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGoogle, Kind: inference.AuthAPIKey}
+		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGoogle, Kind: auth.AuthAPIKey}
 	}
 	counter := newCounter(key, defaultBaseURL)
 	if counter.endpointErr != nil {
@@ -76,29 +81,29 @@ func newCounter(key auth.APIKey, endpoint string) *Counter {
 }
 
 // CountContext sends the complete encoded inference request to countTokens.
-func (c *Counter) CountContext(ctx context.Context, req inference.Request) (inference.ContextCount, error) {
+func (c *Counter) CountContext(ctx context.Context, req inference.Request) (contextcount.ContextCount, error) {
 	if err := c.validateState(ctx); err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	counterCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	body, err := c.preflight(req)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	httpReq, err := buildRequest(counterCtx, c.endpoint, req.Model.Name, methodCountTokens, "", body)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	httpReq.Header.Set("Accept", contentTypeJSON)
 	if err := c.auth.Authorize(counterCtx, httpReq); err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	count, err := c.do(httpReq)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
-	return inference.ContextCount{Model: req.Model.Key(), InputTokens: count, Quality: inference.CountQualityExactProvider}, nil
+	return contextcount.ContextCount{Model: req.Model.Key(), InputTokens: count, Quality: contextcount.CountQualityExactProvider}, nil
 }
 
 func (c *Counter) validateState(ctx context.Context) error {
@@ -132,15 +137,15 @@ func (c *Counter) validateConfiguration() error {
 
 func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 	if llm.Provider(req.Model.Provider) != llm.ProviderGoogle {
-		return nil, &inference.ModelMismatchError{
-			BoundProvider: inference.ProviderName(llm.ProviderGoogle), RequestProvider: req.Model.Provider,
+		return nil, &failure.ModelMismatchError{
+			BoundProvider: model.ProviderName(llm.ProviderGoogle), RequestProvider: req.Model.Provider,
 			BoundEndpoint: c.endpoint, RequestEndpoint: req.Model.BaseURL,
 		}
 	}
 	if err := llm.ValidateModel(req.Model); err != nil {
 		return nil, err
 	}
-	if req.Model.APIFormat != inference.APIFormatGemini {
+	if req.Model.APIFormat != model.APIFormatGemini {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
 	generateBody, err := geminicodec.EncodeRequest(req)
@@ -202,7 +207,7 @@ func rejectModelField(object []byte) error {
 func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
 	response, err := c.hc.Do(req)
 	if err != nil {
-		return 0, &inference.NetworkError{Err: err}
+		return 0, &failure.NetworkError{Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode/100 != 2 {
@@ -210,7 +215,7 @@ func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
 	}
 	body, tooLarge, err := readCountResponseBody(response.Body)
 	if err != nil {
-		return 0, &inference.NetworkError{Err: err}
+		return 0, &failure.NetworkError{Err: err}
 	}
 	if tooLarge {
 		return 0, &CounterResponseError{Reason: CounterResponseBodyTooLarge}
@@ -304,23 +309,23 @@ func rejectDuplicateCountFields(decoder *json.Decoder) error {
 func (c countScalar) tokenCount() (content.TokenCount, error) {
 	raw := bytes.TrimSpace(c.raw)
 	if bytes.Equal(raw, []byte("null")) {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonNull)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonNull)
 	}
 	if !countNumber(raw) {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonInvalidType)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonInvalidType)
 	}
 	if bytes.ContainsAny(raw, ".eE") {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonFractional)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonFractional)
 	}
 	value, err := strconv.ParseInt(string(raw), 10, 64)
 	if err != nil {
 		if errors.Is(err, strconv.ErrRange) {
-			return 0, countNormalizationError(inference.UsageNormalizationReasonOutOfRange)
+			return 0, countNormalizationError(usage.UsageNormalizationReasonOutOfRange)
 		}
-		return 0, countNormalizationError(inference.UsageNormalizationReasonInvalidType)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonInvalidType)
 	}
 	if value < 0 {
-		return 0, &inference.UsageNormalizationError{Field: inference.UsageNormalizationFieldInputTokens, Reason: inference.UsageNormalizationReasonNegative, Value: value}
+		return 0, &usage.UsageNormalizationError{Field: usage.UsageNormalizationFieldInputTokens, Reason: usage.UsageNormalizationReasonNegative, Value: value}
 	}
 	return content.TokenCount(value), nil
 }
@@ -329,29 +334,29 @@ func countNumber(raw []byte) bool {
 	return len(raw) > 0 && (raw[0] == '-' || raw[0] >= '0' && raw[0] <= '9')
 }
 
-func countNormalizationError(reason inference.UsageNormalizationReason) error {
-	return &inference.UsageNormalizationError{Field: inference.UsageNormalizationFieldInputTokens, Reason: reason}
+func countNormalizationError(reason usage.UsageNormalizationReason) error {
+	return &usage.UsageNormalizationError{Field: usage.UsageNormalizationFieldInputTokens, Reason: reason}
 }
 
 // CounterCapability declares countTokens as exact provider counting over the
 // same Google API endpoint, conservatively allowing provider logging.
-func (c *Counter) CounterCapability() inference.CounterCapability {
+func (c *Counter) CounterCapability() contextcount.CounterCapability {
 	if c == nil || c.validateConfiguration() != nil {
-		return inference.CounterCapability{}
+		return contextcount.CounterCapability{}
 	}
-	return inference.CounterCapability{
-		Provider:         inference.ProviderID(llm.ProviderGoogle),
-		Transport:        inference.CounterTransportSameEndpoint,
+	return contextcount.CounterCapability{
+		Provider:         contextcount.ProviderID(llm.ProviderGoogle),
+		Transport:        contextcount.CounterTransportSameEndpoint,
 		SecurityIdentity: counterSecurityIdentity(c.endpoint),
-		Retention:        inference.RetentionLogged,
+		Retention:        contextcount.RetentionLogged,
 		TokenizerRev:     counterTokenizerRevision,
-		Quality:          inference.CountQualityExactProvider,
+		Quality:          contextcount.CountQualityExactProvider,
 	}
 }
 
-func counterSecurityIdentity(endpoint string) inference.SecurityIdentity {
+func counterSecurityIdentity(endpoint string) contextcount.SecurityIdentity {
 	material := "provider=google\nendpoint=" + endpoint + "\nauth=x-goog-api-key\ntransport=tls\npolicy=" + googleSecurityPolicyRevision
-	return inference.SecurityIdentity(sha256.Sum256([]byte(material)))
+	return contextcount.SecurityIdentity(sha256.Sum256([]byte(material)))
 }
 
 func canonicalCounterEndpoint(endpoint string) (string, *CounterEndpointError) {

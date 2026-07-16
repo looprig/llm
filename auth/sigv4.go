@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/looprig/inference"
+	inferauth "github.com/looprig/inference/auth"
 )
 
 // SigV4Credentials is an AWS credential set for the Bedrock signer. Its
@@ -84,13 +84,13 @@ type sigV4Auth struct {
 	now     func() time.Time
 }
 
-var _ inference.Authenticator = (*sigV4Auth)(nil)
+var _ inferauth.Authenticator = (*sigV4Auth)(nil)
 
 // SigV4 returns an Authenticator that signs requests with AWS Signature Version 4 for the given
 // region and service (e.g. region "us-east-1", service "bedrock"). The signature is computed at
 // sign time from the current UTC clock. Empty AccessKeyID/SecretAccessKey make Authorize fail
 // closed with *MissingSigV4CredentialsError.
-func SigV4(creds SigV4Credentials, region, service string) inference.Authenticator {
+func SigV4(creds SigV4Credentials, region, service string) inferauth.Authenticator {
 	return newSigV4(creds, region, service, time.Now)
 }
 

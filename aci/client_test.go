@@ -36,8 +36,13 @@ import (
 	"time"
 
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	failure "github.com/looprig/inference/failure"
+	model "github.com/looprig/inference/model"
+	stream "github.com/looprig/inference/stream"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 )
 
@@ -473,9 +478,9 @@ func tamperBytes(b []byte) []byte {
 // testRequest builds a minimal chat Request with one user message.
 func testRequest() inference.Request {
 	return inference.Request{
-		Model: inference.Model{
-			Provider:  inference.ProviderName(llm.ProviderPhala),
-			APIFormat: inference.APIFormatOpenAI,
+		Model: model.Model{
+			Provider:  model.ProviderName(llm.ProviderPhala),
+			APIFormat: model.APIFormatOpenAI,
 			BaseURL:   testBaseURL,
 			Name:      testClientModel,
 		},
@@ -605,9 +610,9 @@ func TestInvokeFailures(t *testing.T) {
 			name:   "non-2xx POST -> transport error",
 			tweaks: gatewayTweaks{status: http.StatusBadGateway},
 			check: func(t *testing.T, err error) {
-				var apiErr *inference.APIError
+				var apiErr *failure.APIError
 				if !errors.As(err, &apiErr) {
-					t.Fatalf("error = %T (%v), want *inference.APIError", err, err)
+					t.Fatalf("error = %T (%v), want *failure.APIError", err, err)
 				}
 				if apiErr.Status != http.StatusBadGateway {
 					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, http.StatusBadGateway)
@@ -658,7 +663,7 @@ func TestInvokeFailures(t *testing.T) {
 }
 
 // TestInvokeTransportError asserts a transport-level Do failure surfaces as a
-// typed *inference.NetworkError with no partial response (and no key leak).
+// typed *failure.NetworkError with no partial response (and no key leak).
 func TestInvokeTransportError(t *testing.T) {
 	t.Parallel()
 	keys := newGatewayKeys(t)
@@ -676,9 +681,9 @@ func TestInvokeTransportError(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("Invoke() response = %+v, want nil", resp)
 	}
-	var netErr *inference.NetworkError
+	var netErr *failure.NetworkError
 	if !errors.As(err, &netErr) {
-		t.Fatalf("error = %T (%v), want *inference.NetworkError", err, err)
+		t.Fatalf("error = %T (%v), want *failure.NetworkError", err, err)
 	}
 	if strings.Contains(err.Error(), testAPIKey) {
 		t.Fatalf("API key leaked into error string: %q", err.Error())
@@ -811,7 +816,7 @@ func TestStreamUsageResult(t *testing.T) {
 				if reader != nil {
 					t.Fatalf("Stream() reader = %+v, want nil after malformed usage", reader)
 				}
-				assertUsageNormalizationError(t, err, inference.UsageNormalizationFieldInputTokens)
+				assertUsageNormalizationError(t, err, usage.UsageNormalizationFieldInputTokens)
 				return
 			}
 			if tt.wantReason != "" {
@@ -838,24 +843,24 @@ func TestStreamUsageResult(t *testing.T) {
 			if result.Model != testClientModel {
 				t.Errorf("Result().Model = %q, want %q", result.Model, testClientModel)
 			}
-			if result.FinishReason != inference.FinishReasonStop {
-				t.Errorf("Result().FinishReason = %q, want %q", result.FinishReason, inference.FinishReasonStop)
+			if result.FinishReason != stream.FinishReasonStop {
+				t.Errorf("Result().FinishReason = %q, want %q", result.FinishReason, stream.FinishReasonStop)
 			}
 		})
 	}
 }
 
-func assertUsageNormalizationError(t *testing.T, err error, field inference.UsageNormalizationField) {
+func assertUsageNormalizationError(t *testing.T, err error, field usage.UsageNormalizationField) {
 	t.Helper()
-	var usageErr *inference.UsageNormalizationError
+	var usageErr *usage.UsageNormalizationError
 	if !errors.As(err, &usageErr) {
-		t.Fatalf("error = %T (%v), want *inference.UsageNormalizationError", err, err)
+		t.Fatalf("error = %T (%v), want *usage.UsageNormalizationError", err, err)
 	}
 	if usageErr.Field != field {
 		t.Errorf("UsageNormalizationError.Field = %q, want %q", usageErr.Field, field)
 	}
-	if usageErr.Reason != inference.UsageNormalizationReasonNegative {
-		t.Errorf("UsageNormalizationError.Reason = %q, want %q", usageErr.Reason, inference.UsageNormalizationReasonNegative)
+	if usageErr.Reason != usage.UsageNormalizationReasonNegative {
+		t.Errorf("UsageNormalizationError.Reason = %q, want %q", usageErr.Reason, usage.UsageNormalizationReasonNegative)
 	}
 }
 
@@ -880,7 +885,7 @@ func (f *fakeDoer) streamResponse(status int, body []byte, receiptID string) *ht
 
 // drainStream pulls every chunk from a reader until io.EOF, returning them in
 // order. A non-EOF error fails the test. It also asserts Close is a no-op error.
-func drainStream(t *testing.T, r *inference.StreamReader[content.Chunk]) []content.Chunk {
+func drainStream(t *testing.T, r *stream.StreamReader[content.Chunk]) []content.Chunk {
 	t.Helper()
 	var chunks []content.Chunk
 	for {
@@ -1069,7 +1074,7 @@ func TestStreamFailuresZeroChunks(t *testing.T) {
 	}
 }
 
-// TestStreamNon2xx asserts a non-2xx POST surfaces as a typed *inference.APIError with
+// TestStreamNon2xx asserts a non-2xx POST surfaces as a typed *failure.APIError with
 // a nil reader (zero chunks), no key leak.
 func TestStreamNon2xx(t *testing.T) {
 	t.Parallel()
@@ -1081,9 +1086,9 @@ func TestStreamNon2xx(t *testing.T) {
 	if reader != nil {
 		t.Fatalf("Stream() reader = %+v, want nil", reader)
 	}
-	var apiErr *inference.APIError
+	var apiErr *failure.APIError
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("error = %T (%v), want *inference.APIError", err, err)
+		t.Fatalf("error = %T (%v), want *failure.APIError", err, err)
 	}
 	if apiErr.Status != http.StatusBadGateway {
 		t.Errorf("APIError.Status = %d, want %d", apiErr.Status, http.StatusBadGateway)
@@ -1094,7 +1099,7 @@ func TestStreamNon2xx(t *testing.T) {
 }
 
 // TestStreamTransportError asserts a transport-level Do failure surfaces as a
-// typed *inference.NetworkError with a nil reader (no key leak).
+// typed *failure.NetworkError with a nil reader (no key leak).
 func TestStreamTransportError(t *testing.T) {
 	t.Parallel()
 	keys := newGatewayKeys(t)
@@ -1112,9 +1117,9 @@ func TestStreamTransportError(t *testing.T) {
 	if reader != nil {
 		t.Fatalf("Stream() reader = %+v, want nil", reader)
 	}
-	var netErr *inference.NetworkError
+	var netErr *failure.NetworkError
 	if !errors.As(err, &netErr) {
-		t.Fatalf("error = %T (%v), want *inference.NetworkError", err, err)
+		t.Fatalf("error = %T (%v), want *failure.NetworkError", err, err)
 	}
 	if strings.Contains(err.Error(), testAPIKey) {
 		t.Fatalf("API key leaked into error string: %q", err.Error())

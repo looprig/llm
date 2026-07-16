@@ -1,4 +1,4 @@
-package inference
+package model
 
 // Effort is dialect-neutral "how hard to think" intent. Each codec maps it to its wire
 // mechanism (openaiapi → reasoning_effort; anthropicapi → adaptive thinking + effort). Zero

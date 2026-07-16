@@ -1,4 +1,4 @@
-package inference
+package model
 
 // ModelKey is the stable, secret-free identity of a resolved model. It contains
 // only the provider namespace and provider model ID, so identity never depends

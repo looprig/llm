@@ -16,16 +16,22 @@ github.com/google/logger
 # github.com/looprig/core v0.2.0 => ../core
 ## explicit; go 1.25.0
 github.com/looprig/core/content
-# github.com/looprig/inference v0.2.0 => ../inference
+# github.com/looprig/inference v0.3.0 => ../inference
 ## explicit; go 1.26.4
 github.com/looprig/inference
 github.com/looprig/inference/auth
+github.com/looprig/inference/codec
 github.com/looprig/inference/codec/anthropicapi
 github.com/looprig/inference/codec/geminiapi
 github.com/looprig/inference/codec/openaiapi
+github.com/looprig/inference/contextcount
+github.com/looprig/inference/failure
 github.com/looprig/inference/internal/usagenorm
+github.com/looprig/inference/model
 github.com/looprig/inference/route
+github.com/looprig/inference/stream
 github.com/looprig/inference/transport
+github.com/looprig/inference/usage
 github.com/looprig/inference/wire/jsonbody
 github.com/looprig/inference/wire/sse
 # go.uber.org/multierr v1.11.0

@@ -17,11 +17,16 @@ import (
 
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
+	codec "github.com/looprig/inference/codec"
 	"github.com/looprig/inference/codec/anthropicapi"
 	"github.com/looprig/inference/codec/geminiapi"
 	"github.com/looprig/inference/codec/openaiapi"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/route"
+
 	"github.com/looprig/inference/transport"
+
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
@@ -60,25 +65,25 @@ func (e *PolicyNotConstructibleError) Error() string {
 // New validates model, enforces the provider's fail-closed auth requirement, then
 // constructs the concrete provider client. Ordered:
 //  1. llm.ValidateModel — a self-contradictory or unknown-provider model yields a
-//     *inference.ValidationError before anything else.
+//     *model.ValidationError before anything else.
 //  2. Provider.RequiredAuth — an unknown provider fails closed with a
-//     *inference.ValidationError (never a permissive default).
+//     *model.ValidationError (never a permissive default).
 //  3. A provider that requires an API key but is given none yields a
 //     *llm.AuthRequiredError — fail-closed, before any network object exists.
 //  4. Dispatch on Provider to the concrete client.
 //
 // No live I/O happens here; the returned inference.Client performs its own
 // per-request guards (binding, validation, auth) when Invoke/Stream is called.
-func New(model inference.Model, key auth.APIKey) (inference.Client, error) {
-	if err := llm.ValidateModel(model); err != nil {
+func New(selected model.Model, key auth.APIKey) (inference.Client, error) {
+	if err := llm.ValidateModel(selected); err != nil {
 		return nil, err
 	}
-	p := llm.Provider(model.Provider)
+	p := llm.Provider(selected.Provider)
 	kind, err := p.RequiredAuth()
 	if err != nil {
 		return nil, err
 	}
-	if kind == inference.AuthAPIKey && key == "" {
+	if kind == auth.AuthAPIKey && key == "" {
 		return nil, &llm.AuthRequiredError{Provider: p, Kind: kind}
 	}
 	switch p {
@@ -92,18 +97,18 @@ func New(model inference.Model, key auth.APIKey) (inference.Client, error) {
 		// cannot feed.
 		return nil, &PolicyNotConstructibleError{Provider: llm.ProviderPhala, Use: "phala.New"}
 	case llm.ProviderChutes:
-		return chutes.New(model.BaseURL, string(key)), nil
+		return chutes.New(selected.BaseURL, string(key)), nil
 	case llm.ProviderLMStudio:
 		// LM Studio can speak either dialect (supportsAPIFormat admits both); genericHTTP
 		// selects the codec by the model's declared APIFormat and fails closed on any
 		// format with no codec, rather than silently mis-encoding. A local endpoint needs
 		// no credentials.
-		return genericHTTP(model, auth.None())
+		return genericHTTP(selected, auth.None())
 	case llm.ProviderOpenRouter:
 		// OpenRouter is an OpenAI-compatible aggregation gateway behind a Bearer key. The
 		// fail-closed empty-key guard above (RequiredAuth → AuthAPIKey) already rejected a
 		// missing key, so key is present here; wrap it as Bearer auth.
-		return genericHTTP(model, auth.Key(key))
+		return genericHTTP(selected, auth.Key(key))
 	case llm.ProviderGoogle:
 		// Google's Gemini generateContent API is not plain codec-over-HTTP (per-model
 		// ":generateContent" path + an x-goog-api-key header), so it uses the bespoke
@@ -122,7 +127,7 @@ func New(model inference.Model, key auth.APIKey) (inference.Client, error) {
 		// Defensive: RequiredAuth above already rejects any provider not handled
 		// here, so this is unreachable for a validated model — but a permissive
 		// fall-through would fail open, so deny by default.
-		return nil, &inference.ValidationError{Field: "Provider", Reason: "unsupported provider"}
+		return nil, &model.ValidationError{Field: "Provider", Reason: "unsupported provider"}
 	}
 }
 
@@ -134,7 +139,7 @@ func New(model inference.Model, key auth.APIKey) (inference.Client, error) {
 // decision stays at the composition root, not in the transport. The route is the
 // static OpenAI/Anthropic-style chat path; the endpoint binds provider + format so the
 // transport's per-request binding check catches a cross-wired Model.
-func genericHTTP(model inference.Model, a inference.Authenticator) (inference.Client, error) {
+func genericHTTP(model model.Model, a auth.Authenticator) (inference.Client, error) {
 	codec, err := codecFor(model.APIFormat)
 	if err != nil {
 		return nil, err
@@ -144,7 +149,7 @@ func genericHTTP(model inference.Model, a inference.Authenticator) (inference.Cl
 		baseURL = defaultGenericBaseURL(llm.Provider(model.Provider))
 	}
 	return transport.New(
-		inference.Endpoint{
+		transport.Endpoint{
 			BaseURL:   baseURL,
 			Provider:  model.Provider,
 			APIFormat: model.APIFormat,
@@ -184,17 +189,17 @@ func defaultGenericBaseURL(p llm.Provider) string {
 // declared APIFormat. ValidateModel already admits every APIFormat the provider
 // supports, and a provider may legitimately support a format auto cannot yet encode;
 // codecFor is the fail-closed boundary that turns "no codec implemented" into a typed
-// *inference.ValidationError at construction rather than a silent wrong-dialect encode.
+// *model.ValidationError at construction rather than a silent wrong-dialect encode.
 // Adding a new dialect is one new case here.
-func codecFor(f inference.APIFormat) (inference.Codec, error) {
+func codecFor(f model.APIFormat) (codec.Codec, error) {
 	switch f {
-	case inference.APIFormatOpenAI:
+	case model.APIFormatOpenAI:
 		return openaiapi.Codec{}, nil
-	case inference.APIFormatAnthropic:
+	case model.APIFormatAnthropic:
 		return anthropicapi.Codec{}, nil
-	case inference.APIFormatGemini:
+	case model.APIFormatGemini:
 		return geminiapi.Codec{}, nil
 	default:
-		return nil, &inference.ValidationError{Field: "APIFormat", Reason: "no codec implemented for this API format yet"}
+		return nil, &model.ValidationError{Field: "APIFormat", Reason: "no codec implemented for this API format yet"}
 	}
 }

@@ -1,4 +1,4 @@
-package inference
+package stream
 
 import (
 	"errors"

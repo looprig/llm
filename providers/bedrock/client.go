@@ -23,7 +23,11 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	inferauth "github.com/looprig/inference/auth"
 	"github.com/looprig/inference/codec/anthropicapi"
+	failure "github.com/looprig/inference/failure"
+	model "github.com/looprig/inference/model"
+	stream "github.com/looprig/inference/stream"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/auth"
 )
@@ -64,11 +68,11 @@ const (
 // SigV4 signer (built from the caller's credentials) and one http.Client, and is
 // safe for concurrent use (both are immutable after construction). Connection
 // binding is by provider+region: a request whose Model.Provider is not
-// ProviderBedrock is rejected pre-I/O with *inference.ModelMismatchError.
+// ProviderBedrock is rejected pre-I/O with *failure.ModelMismatchError.
 type Client struct {
 	region   string
 	endpoint string // scheme://host base, e.g. https://bedrock-runtime.us-east-1.amazonaws.com
-	signer   inference.Authenticator
+	signer   inferauth.Authenticator
 	codec    anthropicapi.Codec
 	hc       *http.Client
 }
@@ -165,7 +169,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	// supportsAPIFormat(bedrock) admits both Anthropic and Bedrock Converse, so a
 	// Converse Model passes ValidateModel; this client only implements the Anthropic
 	// dialect, so fail closed rather than silently Anthropic-encode a Converse call.
-	if req.Model.APIFormat != inference.APIFormatAnthropic {
+	if req.Model.APIFormat != model.APIFormatAnthropic {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
 
@@ -188,15 +192,15 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 
 	httpResp, err := c.hc.Do(httpReq)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	defer httpResp.Body.Close()
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, &inference.NetworkError{Err: err}
+		return nil, &failure.NetworkError{Err: err}
 	}
 	if httpResp.StatusCode/100 != 2 {
-		return nil, &inference.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
 	}
 	return c.codec.DecodeResponse(respBody)
 }
@@ -204,7 +208,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 // Stream is not implemented: Bedrock streaming uses AWS eventstream framing, a
 // documented follow-up. It fails closed with *StreamingNotSupportedError and opens
 // no connection.
-func (c *Client) Stream(_ context.Context, _ inference.Request) (*inference.StreamReader[content.Chunk], error) {
+func (c *Client) Stream(_ context.Context, _ inference.Request) (*stream.StreamReader[content.Chunk], error) {
 	return nil, &StreamingNotSupportedError{}
 }
 
@@ -212,10 +216,10 @@ func (c *Client) Stream(_ context.Context, _ inference.Request) (*inference.Stre
 // Bedrock, before any I/O. Bedrock is region-bound (the Model carries no region
 // and, by convention, an empty BaseURL), so the enforceable binding is the
 // provider; the region is fixed at construction.
-func (c *Client) checkBinding(m inference.Model) error {
+func (c *Client) checkBinding(m model.Model) error {
 	if llm.Provider(m.Provider) != llm.ProviderBedrock {
-		return &inference.ModelMismatchError{
-			BoundProvider:   inference.ProviderName(llm.ProviderBedrock),
+		return &failure.ModelMismatchError{
+			BoundProvider:   model.ProviderName(llm.ProviderBedrock),
 			RequestProvider: m.Provider,
 			BoundEndpoint:   c.endpoint,
 			RequestEndpoint: m.BaseURL,

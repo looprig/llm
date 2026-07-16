@@ -1,6 +1,9 @@
 package llm
 
-import "github.com/looprig/inference"
+import (
+	auth "github.com/looprig/inference/auth"
+	model "github.com/looprig/inference/model"
+)
 
 // RequiresKey reports whether the provider needs an API key, and errors on an
 // unknown provider so a newly added one must be classified here before it can be
@@ -19,27 +22,27 @@ func (p Provider) RequiresKey() (bool, error) {
 		// boolean cannot express that. RequiredAuth() is the real gate (AuthSigV4).
 		return false, nil
 	default:
-		return false, &inference.ValidationError{Field: "Provider", Reason: "unknown provider; API-key policy undefined"}
+		return false, &model.ValidationError{Field: "Provider", Reason: "unknown provider; API-key policy undefined"}
 	}
 }
 
 // supportsAPIFormat reports whether provider p is known to speak wire dialect f.
 // It is fail-closed: an unknown provider supports no formats, so a newly added
 // provider must be classified here before any Model naming it can validate.
-func (p Provider) supportsAPIFormat(f inference.APIFormat) bool {
+func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 	switch p {
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter:
-		return f == inference.APIFormatOpenAI
+		return f == model.APIFormatOpenAI
 	case ProviderLMStudio:
-		return f == inference.APIFormatOpenAI || f == inference.APIFormatAnthropic
+		return f == model.APIFormatOpenAI || f == model.APIFormatAnthropic
 	case ProviderBedrock:
 		// Anthropic-on-Bedrock speaks the Anthropic Messages dialect (the
 		// implemented codec); the native Bedrock Converse dialect is reserved for a
 		// future codec but is a legitimate Bedrock format, so both are admitted here.
-		return f == inference.APIFormatAnthropic || f == APIFormatBedrockConverse
+		return f == model.APIFormatAnthropic || f == APIFormatBedrockConverse
 	case ProviderGoogle:
 		// Google's generateContent backend speaks only the Gemini dialect.
-		return f == inference.APIFormatGemini
+		return f == model.APIFormatGemini
 	default:
 		return false
 	}
@@ -62,18 +65,18 @@ func (p Provider) allowsEmptyBaseURL() bool {
 // RequiredAuth reports which credential kind the provider needs, erroring on an unknown provider
 // so a newly added one must be classified here before use. Multi-auth-ready successor to
 // RequiresKey; fail-closed by the same rationale (a permissive default would fail open).
-func (p Provider) RequiredAuth() (inference.AuthKind, error) {
+func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 	switch p {
 	case ProviderLMStudio:
-		return inference.AuthNone, nil
+		return auth.AuthNone, nil
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderGoogle:
-		return inference.AuthAPIKey, nil
+		return auth.AuthAPIKey, nil
 	case ProviderBedrock:
 		// Bedrock authenticates with AWS SigV4, not a bearer API key; a generic auto
 		// factory cannot supply SigV4 credentials, so a Bedrock client is built directly
 		// via bedrock.New.
 		return AuthSigV4, nil
 	default:
-		return "", &inference.ValidationError{Field: "Provider", Reason: "unknown provider; auth policy undefined"}
+		return "", &model.ValidationError{Field: "Provider", Reason: "unknown provider; auth policy undefined"}
 	}
 }

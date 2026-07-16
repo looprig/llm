@@ -5,21 +5,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/looprig/inference"
+	auth "github.com/looprig/inference/auth"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 )
 
 func TestAuthRequiredError(t *testing.T) {
 	t.Parallel()
-	err := error(&llm.AuthRequiredError{Provider: llm.ProviderPhala, Kind: inference.AuthAPIKey})
+	err := error(&llm.AuthRequiredError{Provider: llm.ProviderPhala, Kind: auth.AuthAPIKey})
 	var are *llm.AuthRequiredError
 	if !errors.As(err, &are) {
 		t.Fatalf("errors.As failed for *AuthRequiredError")
 	}
-	if are.Provider != llm.ProviderPhala || are.Kind != inference.AuthAPIKey {
+	if are.Provider != llm.ProviderPhala || are.Kind != auth.AuthAPIKey {
 		t.Errorf("fields not preserved: %+v", are)
 	}
-	if msg := err.Error(); !strings.Contains(msg, "phala") || !strings.Contains(msg, string(inference.AuthAPIKey)) {
+	if msg := err.Error(); !strings.Contains(msg, "phala") || !strings.Contains(msg, string(auth.AuthAPIKey)) {
 		t.Errorf("message missing provider/kind: %q", msg)
 	}
 }
@@ -53,10 +54,10 @@ func TestAttestationError(t *testing.T) {
 }
 
 // TestAuthSigV4Kind confirms the provider-specific SigV4 credential kind is an
-// inference.AuthKind value defined in llm (inference owns only the generic kinds).
+// auth.AuthKind value defined in llm (inference owns only the generic kinds).
 func TestAuthSigV4Kind(t *testing.T) {
 	t.Parallel()
-	if llm.AuthSigV4 == inference.AuthNone || llm.AuthSigV4 == inference.AuthAPIKey {
+	if llm.AuthSigV4 == auth.AuthNone || llm.AuthSigV4 == auth.AuthAPIKey {
 		t.Errorf("AuthSigV4 %q collides with a generic inference AuthKind", llm.AuthSigV4)
 	}
 	if string(llm.AuthSigV4) != "sigv4" {
@@ -71,14 +72,14 @@ func TestCounterSupportError(t *testing.T) {
 		err       *llm.CounterSupportError
 		provider  llm.Provider
 		reason    llm.CounterSupportReason
-		apiFormat inference.APIFormat
+		apiFormat model.APIFormat
 	}{
 		{
 			name:      "unsupported gateway dialect is inspectable",
-			err:       &llm.CounterSupportError{Provider: llm.ProviderOpenRouter, Reason: llm.CounterSupportExactUnavailable, APIFormat: inference.APIFormatOpenAI},
+			err:       &llm.CounterSupportError{Provider: llm.ProviderOpenRouter, Reason: llm.CounterSupportExactUnavailable, APIFormat: model.APIFormatOpenAI},
 			provider:  llm.ProviderOpenRouter,
 			reason:    llm.CounterSupportExactUnavailable,
-			apiFormat: inference.APIFormatOpenAI,
+			apiFormat: model.APIFormatOpenAI,
 		},
 		{
 			name:      "zero value is safe",

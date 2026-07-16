@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/aci"
 	"github.com/looprig/llm/providers/phala"
@@ -66,7 +66,7 @@ func TestNew(t *testing.T) {
 					if !errors.As(err, &are) {
 						t.Fatalf("New() error = %T (%v), want *llm.AuthRequiredError", err, err)
 					}
-					if are.Provider != llm.ProviderPhala || are.Kind != inference.AuthAPIKey {
+					if are.Provider != llm.ProviderPhala || are.Kind != auth.AuthAPIKey {
 						t.Errorf("AuthRequiredError = {Provider:%s Kind:%s}, want {phala api_key}", are.Provider, are.Kind)
 					}
 				}

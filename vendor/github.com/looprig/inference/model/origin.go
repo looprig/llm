@@ -1,4 +1,4 @@
-package inference
+package model
 
 // Origin is a model descriptor's provenance. The zero value is OriginCustom (fail-safe): a raw
 // Model{} literal is treated as user-asserted, so gating stays conservative until proven curated.

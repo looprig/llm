@@ -18,13 +18,18 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	failure "github.com/looprig/inference/failure"
+
 	geminicodec "github.com/looprig/inference/codec/geminiapi"
+	contextcount "github.com/looprig/inference/contextcount"
+	model "github.com/looprig/inference/model"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 )
 
 const counterTestKey auth.APIKey = "AIza-counter-test-key"
 
-var _ inference.ContextCounter = (*Counter)(nil)
+var _ contextcount.ContextCounter = (*Counter)(nil)
 
 type counterCapturedRequest struct {
 	method      string
@@ -80,7 +85,7 @@ func TestCounterCountContext(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CountContext() error = %v", err)
 			}
-			want := inference.ContextCount{Model: req.Model.Key(), InputTokens: tt.wantTokens, Quality: inference.CountQualityExactProvider}
+			want := contextcount.ContextCount{Model: req.Model.Key(), InputTokens: tt.wantTokens, Quality: contextcount.CountQualityExactProvider}
 			if got != want {
 				t.Errorf("CountContext() = %+v, want %+v", got, want)
 			}
@@ -249,9 +254,9 @@ func TestCounterPreflight(t *testing.T) {
 		wantVal    bool
 		wantEncode bool
 	}{
-		{name: "wrong provider", mutate: func(req *inference.Request) { req.Model.Provider = inference.ProviderName(llm.ProviderChutes) }, wantMM: true},
+		{name: "wrong provider", mutate: func(req *inference.Request) { req.Model.Provider = model.ProviderName(llm.ProviderChutes) }, wantMM: true},
 		{name: "empty model name", mutate: func(req *inference.Request) { req.Model.Name = "" }, wantVal: true},
-		{name: "wrong API format", mutate: func(req *inference.Request) { req.Model.APIFormat = inference.APIFormatOpenAI }, wantVal: true},
+		{name: "wrong API format", mutate: func(req *inference.Request) { req.Model.APIFormat = model.APIFormatOpenAI }, wantVal: true},
 		{name: "invalid model URL", mutate: func(req *inference.Request) { req.Model.BaseURL = "http://example.com" }, wantVal: true},
 		{name: "nil conversation cannot be encoded", mutate: func(req *inference.Request) { req.Messages = content.AgenticMessages{nil} }, wantEncode: true},
 	}
@@ -273,15 +278,15 @@ func TestCounterPreflight(t *testing.T) {
 				t.Fatal("CountContext() error = nil, want pre-I/O failure")
 			}
 			if tt.wantMM {
-				var target *inference.ModelMismatchError
+				var target *failure.ModelMismatchError
 				if !errors.As(err, &target) {
-					t.Fatalf("error = %T, want *inference.ModelMismatchError", err)
+					t.Fatalf("error = %T, want *failure.ModelMismatchError", err)
 				}
 			}
 			if tt.wantVal {
-				var target *inference.ValidationError
+				var target *model.ValidationError
 				if !errors.As(err, &target) {
-					t.Fatalf("error = %T, want *inference.ValidationError", err)
+					t.Fatalf("error = %T, want *model.ValidationError", err)
 				}
 			}
 			if tt.wantEncode {
@@ -304,17 +309,17 @@ func TestCounterResponseValidation(t *testing.T) {
 		name       string
 		response   string
 		wantReason CounterResponseReason
-		wantNorm   inference.UsageNormalizationReason
+		wantNorm   usage.UsageNormalizationReason
 	}{
 		{name: "malformed JSON", response: `{"totalTokens":`, wantReason: CounterResponseMalformed},
 		{name: "missing total tokens", response: `{}`, wantReason: CounterResponseMissingCount},
-		{name: "explicit null", response: `{"totalTokens":null}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonNull},
-		{name: "fractional", response: `{"totalTokens":1.5}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonFractional},
-		{name: "exponent", response: `{"totalTokens":1e3}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonFractional},
-		{name: "negative", response: `{"totalTokens":-1}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonNegative},
-		{name: "positive out of range", response: `{"totalTokens":9223372036854775808}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonOutOfRange},
-		{name: "negative out of range", response: `{"totalTokens":-9223372036854775809}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonOutOfRange},
-		{name: "string", response: `{"totalTokens":"private-input"}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonInvalidType},
+		{name: "explicit null", response: `{"totalTokens":null}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonNull},
+		{name: "fractional", response: `{"totalTokens":1.5}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonFractional},
+		{name: "exponent", response: `{"totalTokens":1e3}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonFractional},
+		{name: "negative", response: `{"totalTokens":-1}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonNegative},
+		{name: "positive out of range", response: `{"totalTokens":9223372036854775808}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonOutOfRange},
+		{name: "negative out of range", response: `{"totalTokens":-9223372036854775809}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonOutOfRange},
+		{name: "string", response: `{"totalTokens":"private-input"}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonInvalidType},
 		{name: "trailing JSON", response: `{"totalTokens":1}{"totalTokens":2}`, wantReason: CounterResponseMalformed},
 		{name: "oversized success body", response: strings.Repeat(" ", maxCountResponseBodyBytes+1), wantReason: CounterResponseBodyTooLarge},
 	}
@@ -328,7 +333,7 @@ func TestCounterResponseValidation(t *testing.T) {
 			defer srv.Close()
 
 			got, err := newCounter(counterTestKey, srv.URL).CountContext(context.Background(), counterRequest("gemini-2.5-flash"))
-			if got != (inference.ContextCount{}) {
+			if got != (contextcount.ContextCount{}) {
 				t.Errorf("CountContext() = %+v on error, want zero", got)
 			}
 			var responseErr *CounterResponseError
@@ -342,11 +347,11 @@ func TestCounterResponseValidation(t *testing.T) {
 				t.Errorf("error exposes provider scalar: %q", err)
 			}
 			if tt.wantNorm != "" {
-				var normErr *inference.UsageNormalizationError
+				var normErr *usage.UsageNormalizationError
 				if !errors.As(err, &normErr) {
-					t.Fatalf("error = %T, want wrapped *inference.UsageNormalizationError", err)
+					t.Fatalf("error = %T, want wrapped *usage.UsageNormalizationError", err)
 				}
-				if normErr.Field != inference.UsageNormalizationFieldInputTokens || normErr.Reason != tt.wantNorm {
+				if normErr.Field != usage.UsageNormalizationFieldInputTokens || normErr.Reason != tt.wantNorm {
 					t.Errorf("normalization error = %+v, want InputTokens/%q", normErr, tt.wantNorm)
 				}
 			}
@@ -470,18 +475,18 @@ func TestCounterTransportErrors(t *testing.T) {
 			counter.hc = tt.client
 			_, err := counter.CountContext(ctx, counterRequest("gemini-2.5-flash"))
 			if tt.wantAPI {
-				var apiErr *inference.APIError
+				var apiErr *failure.APIError
 				if !errors.As(err, &apiErr) {
-					t.Fatalf("error = %T, want *inference.APIError", err)
+					t.Fatalf("error = %T, want *failure.APIError", err)
 				}
 				if apiErr.Status != tt.wantStatus || len(apiErr.Body) != tt.wantBody || apiErr.Message != string(apiErr.Body) {
 					t.Errorf("APIError = status:%d body:%d message:%d, want status:%d body/message:%d", apiErr.Status, len(apiErr.Body), len(apiErr.Message), tt.wantStatus, tt.wantBody)
 				}
 			}
 			if tt.wantNet {
-				var netErr *inference.NetworkError
+				var netErr *failure.NetworkError
 				if !errors.As(err, &netErr) {
-					t.Fatalf("error = %T, want *inference.NetworkError", err)
+					t.Fatalf("error = %T, want *failure.NetworkError", err)
 				}
 				if !errors.Is(err, tt.wantCause) {
 					t.Errorf("error = %v, want wrapped cause %v", err, tt.wantCause)
@@ -536,7 +541,7 @@ func TestCounterStateValidation(t *testing.T) {
 			var called atomic.Bool
 			counter := tt.build(&called)
 			got, err := counter.CountContext(tt.ctx, counterRequest("gemini-2.5-flash"))
-			if got != (inference.ContextCount{}) {
+			if got != (contextcount.ContextCount{}) {
 				t.Errorf("CountContext() = %+v on invalid state, want zero", got)
 			}
 			var stateErr *CounterStateError
@@ -549,7 +554,7 @@ func TestCounterStateValidation(t *testing.T) {
 			if called.Load() {
 				t.Error("transport called for invalid counter state")
 			}
-			if tt.wantZeroCap && counter.CounterCapability() != (inference.CounterCapability{}) {
+			if tt.wantZeroCap && counter.CounterCapability() != (contextcount.CounterCapability{}) {
 				t.Errorf("CounterCapability() = %+v for invalid counter state, want zero", counter.CounterCapability())
 			}
 		})
@@ -598,12 +603,12 @@ func TestCounterTimeout(t *testing.T) {
 			started := time.Now()
 			got, err := counter.CountContext(ctx, counterRequest("gemini-2.5-flash"))
 			elapsed := time.Since(started)
-			if got != (inference.ContextCount{}) {
+			if got != (contextcount.ContextCount{}) {
 				t.Errorf("CountContext() = %+v on timeout, want zero", got)
 			}
-			var networkErr *inference.NetworkError
+			var networkErr *failure.NetworkError
 			if !errors.As(err, &networkErr) {
-				t.Fatalf("error = %T %v, want *inference.NetworkError", err, err)
+				t.Fatalf("error = %T %v, want *failure.NetworkError", err, err)
 			}
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("error = %v, want wrapped context deadline", err)
@@ -626,9 +631,9 @@ func TestCounterCapability(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		got       inference.CounterCapability
-		wantEqual *inference.CounterCapability
-		wantDiff  *inference.CounterCapability
+		got       contextcount.CounterCapability
+		wantEqual *contextcount.CounterCapability
+		wantDiff  *contextcount.CounterCapability
 	}{
 		{name: "structurally valid", got: first},
 		{name: "same endpoint ignores credential", got: second, wantEqual: &first},
@@ -642,10 +647,10 @@ func TestCounterCapability(t *testing.T) {
 			if err := tt.got.Validate(); err != nil {
 				t.Fatalf("CounterCapability().Validate() error = %v", err)
 			}
-			if tt.got.Provider != inference.ProviderID(llm.ProviderGoogle) || tt.got.Transport != inference.CounterTransportSameEndpoint || tt.got.Retention != inference.RetentionLogged || tt.got.TokenizerRev != counterTokenizerRevision || tt.got.Quality != inference.CountQualityExactProvider {
+			if tt.got.Provider != contextcount.ProviderID(llm.ProviderGoogle) || tt.got.Transport != contextcount.CounterTransportSameEndpoint || tt.got.Retention != contextcount.RetentionLogged || tt.got.TokenizerRev != counterTokenizerRevision || tt.got.Quality != contextcount.CountQualityExactProvider {
 				t.Errorf("CounterCapability() = %+v, want google/same-endpoint/logged/pinned-revision/exact-provider", tt.got)
 			}
-			if tt.got.SecurityIdentity == (inference.SecurityIdentity{}) {
+			if tt.got.SecurityIdentity == (contextcount.SecurityIdentity{}) {
 				t.Error("SecurityIdentity is zero")
 			}
 			if tt.wantEqual != nil && tt.got != *tt.wantEqual {
@@ -655,7 +660,7 @@ func TestCounterCapability(t *testing.T) {
 				t.Error("different endpoint retained the same SecurityIdentity")
 			}
 			keyDigest := sha256.Sum256([]byte("key-one"))
-			if tt.got.SecurityIdentity == inference.SecurityIdentity(keyDigest) {
+			if tt.got.SecurityIdentity == contextcount.SecurityIdentity(keyDigest) {
 				t.Error("SecurityIdentity is a credential digest")
 			}
 		})
@@ -793,7 +798,7 @@ func TestCounterRejectsUnsafeEndpoint(t *testing.T) {
 			if tt.secret != "" && strings.Contains(counter.endpoint, tt.secret) {
 				t.Errorf("counter transport config retains credential: %q", counter.endpoint)
 			}
-			if got := counter.CounterCapability(); got != (inference.CounterCapability{}) {
+			if got := counter.CounterCapability(); got != (contextcount.CounterCapability{}) {
 				t.Errorf("CounterCapability() = %+v for unsafe endpoint, want zero metadata", got)
 			}
 		})
@@ -823,7 +828,7 @@ func TestCounterConstructionAndClientSeparation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("New() error = %v", err)
 				}
-				if _, ok := client.(inference.ContextCounter); ok {
+				if _, ok := client.(contextcount.ContextCounter); ok {
 					t.Fatal("ordinary Gemini inference client unexpectedly implements ContextCounter")
 				}
 				return
@@ -933,7 +938,7 @@ func FuzzCounterEndpoint(f *testing.F) {
 
 func counterRequest(modelName string) inference.Request {
 	return inference.Request{
-		Model: inference.CustomModel(inference.ProviderName(llm.ProviderGoogle), inference.APIFormatGemini, defaultBaseURL, modelName),
+		Model: model.CustomModel(model.ProviderName(llm.ProviderGoogle), model.APIFormatGemini, defaultBaseURL, modelName),
 		Messages: content.AgenticMessages{
 			&content.UserMessage{Message: content.Message{Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "hello"}}}},
 		},
@@ -944,13 +949,13 @@ func completeCounterRequest(modelName string) inference.Request {
 	temperature := 0.25
 	maxTokens := 128
 	return inference.Request{
-		Model: inference.CustomModel(
-			inference.ProviderName(llm.ProviderGoogle),
-			inference.APIFormatGemini,
+		Model: model.CustomModel(
+			model.ProviderName(llm.ProviderGoogle),
+			model.APIFormatGemini,
 			defaultBaseURL,
 			modelName,
-			inference.WithTools(),
-			inference.WithSampling(inference.Sampling{Temperature: &temperature, MaxTokens: &maxTokens}),
+			model.WithTools(),
+			model.WithSampling(model.Sampling{Temperature: &temperature, MaxTokens: &maxTokens}),
 		),
 		System: "You are concise.",
 		Messages: content.AgenticMessages{

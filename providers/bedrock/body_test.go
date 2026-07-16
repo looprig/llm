@@ -8,6 +8,7 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/codec/anthropicapi"
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/auth"
 	"github.com/looprig/llm/providers/bedrock"
@@ -25,11 +26,11 @@ func TestBedrockBodyTransform(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		override     *inference.Sampling
+		override     *model.Sampling
 		wantMaxToken float64
 	}{
 		{name: "default max_tokens survives, model dropped, version added", wantMaxToken: 4096},
-		{name: "explicit max_tokens override survives rewrite", override: &inference.Sampling{MaxTokens: intptr(256)}, wantMaxToken: 256},
+		{name: "explicit max_tokens override survives rewrite", override: &model.Sampling{MaxTokens: intptr(256)}, wantMaxToken: 256},
 	}
 
 	for _, tt := range tests {
@@ -135,7 +136,7 @@ func bytesEqualJSON(a, b json.RawMessage) bool {
 // bedrockRequest builds a minimal valid ProviderBedrock request for name.
 func bedrockRequest(name string) inference.Request {
 	return inference.Request{
-		Model: inference.CustomModel(inference.ProviderName(llm.ProviderBedrock), inference.APIFormatAnthropic, "", name, inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}), inference.WithTools(), inference.WithImages()),
+		Model: model.CustomModel(model.ProviderName(llm.ProviderBedrock), model.APIFormatAnthropic, "", name, model.WithContextLimits(model.ContextLimits{WindowTokens: 200_000}), model.WithTools(), model.WithImages()),
 		Messages: content.AgenticMessages{
 			&content.UserMessage{Message: content.Message{
 				Role:   content.RoleUser,

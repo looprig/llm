@@ -1,6 +1,11 @@
-package inference
+package route
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/looprig/inference"
+	"github.com/looprig/inference/codec"
+)
 
 // Route is a fully-resolved outbound request target: method, absolute URL, and route headers.
 // It is what a Router returns so the generic transport need not hardcode POST, a chat path, a
@@ -16,5 +21,5 @@ type Route struct {
 // streamGenerateContent routes) out of the transport. Concrete builders live in the route
 // package; callers may supply any Router.
 type Router interface {
-	BuildRoute(baseURL string, req Request, mode RequestMode) (Route, error)
+	BuildRoute(baseURL string, req inference.Request, mode codec.RequestMode) (Route, error)
 }

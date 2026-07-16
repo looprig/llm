@@ -14,6 +14,9 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	failure "github.com/looprig/inference/failure"
+
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 	gemini "github.com/looprig/llm/providers/gemini"
 )
@@ -36,8 +39,8 @@ const geminiResponseJSON = `{
 // geminiModel builds a Google/Gemini Model with the given model id. BaseURL is the
 // real Gemini root so ValidateModel passes; the client routes to its bound
 // (test-overridden) endpoint, not this BaseURL.
-func geminiModel(name string) inference.Model {
-	return inference.CustomModel(inference.ProviderName(llm.ProviderGoogle), inference.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", name)
+func geminiModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderGoogle), model.APIFormatGemini, "https://generativelanguage.googleapis.com/v1beta", name)
 }
 
 // geminiRequest builds a minimal one-user-message Request for model name.
@@ -142,8 +145,8 @@ func TestGeminiInvoke(t *testing.T) {
 }
 
 // TestGeminiInvokeErrors covers the mapped failure modes: a non-2xx status maps to
-// *inference.APIError (preserving status + body) and a transport failure (server
-// closes the connection) maps to *inference.NetworkError.
+// *failure.APIError (preserving status + body) and a transport failure (server
+// closes the connection) maps to *failure.NetworkError.
 func TestGeminiInvokeErrors(t *testing.T) {
 	t.Parallel()
 
@@ -201,9 +204,9 @@ func TestGeminiInvokeErrors(t *testing.T) {
 
 			switch {
 			case tt.wantAPIErr:
-				var apiErr *inference.APIError
+				var apiErr *failure.APIError
 				if !errors.As(err, &apiErr) {
-					t.Fatalf("err = %T, want *inference.APIError", err)
+					t.Fatalf("err = %T, want *failure.APIError", err)
 				}
 				if apiErr.Status != tt.wantAPICode {
 					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tt.wantAPICode)
@@ -212,9 +215,9 @@ func TestGeminiInvokeErrors(t *testing.T) {
 					t.Error("APIError.Body is empty, want the raw provider payload")
 				}
 			case tt.wantNetErr:
-				var netErr *inference.NetworkError
+				var netErr *failure.NetworkError
 				if !errors.As(err, &netErr) {
-					t.Fatalf("err = %T, want *inference.NetworkError", err)
+					t.Fatalf("err = %T, want *failure.NetworkError", err)
 				}
 			}
 		})
@@ -254,9 +257,9 @@ func TestGeminiAPIErrorBodyBound(t *testing.T) {
 			defer srv.Close()
 
 			err := tt.call(gemini.NewWithEndpoint(testKey, srv.URL))
-			var apiErr *inference.APIError
+			var apiErr *failure.APIError
 			if !errors.As(err, &apiErr) {
-				t.Fatalf("error = %T, want *inference.APIError", err)
+				t.Fatalf("error = %T, want *failure.APIError", err)
 			}
 			if len(apiErr.Body) != wantLimit {
 				t.Errorf("APIError.Body length = %d, want bounded %d", len(apiErr.Body), wantLimit)
@@ -340,7 +343,7 @@ func TestGeminiStream(t *testing.T) {
 }
 
 // TestGeminiStreamErrorStatus locks the streaming non-2xx path: a non-2xx status is
-// mapped to *inference.APIError (with the drained body) and no reader is returned.
+// mapped to *failure.APIError (with the drained body) and no reader is returned.
 func TestGeminiStreamErrorStatus(t *testing.T) {
 	t.Parallel()
 
@@ -355,9 +358,9 @@ func TestGeminiStreamErrorStatus(t *testing.T) {
 	if reader != nil {
 		t.Error("Stream() returned a non-nil reader alongside an error")
 	}
-	var apiErr *inference.APIError
+	var apiErr *failure.APIError
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("err = %T, want *inference.APIError", err)
+		t.Fatalf("err = %T, want *failure.APIError", err)
 	}
 	if apiErr.Status != http.StatusTooManyRequests {
 		t.Errorf("APIError.Status = %d, want %d", apiErr.Status, http.StatusTooManyRequests)
@@ -369,11 +372,11 @@ func TestGeminiStreamErrorStatus(t *testing.T) {
 
 // TestGeminiPreIOGuards verifies the ordered fail-closed guards run before any
 // network I/O and open no connection: a non-Google provider is a
-// *inference.ModelMismatchError; an invalid Model (empty name) is a
-// *inference.ValidationError; and a non-Gemini API format on a Google model fails
+// *failure.ModelMismatchError; an invalid Model (empty name) is a
+// *model.ValidationError; and a non-Gemini API format on a Google model fails
 // closed at ValidateModel (Google speaks only the Gemini dialect, so the format
 // never reaches the client's UnsupportedAPIFormatError guard) — still a
-// *inference.ValidationError, still no network. Each case is exercised on both
+// *model.ValidationError, still no network. Each case is exercised on both
 // Invoke and Stream.
 func TestGeminiPreIOGuards(t *testing.T) {
 	t.Parallel()
@@ -386,7 +389,7 @@ func TestGeminiPreIOGuards(t *testing.T) {
 	}{
 		{
 			name:   "wrong provider is a model mismatch",
-			mutate: func(r *inference.Request) { r.Model.Provider = inference.ProviderName(llm.ProviderChutes) },
+			mutate: func(r *inference.Request) { r.Model.Provider = model.ProviderName(llm.ProviderChutes) },
 			wantMM: true,
 		},
 		{
@@ -396,7 +399,7 @@ func TestGeminiPreIOGuards(t *testing.T) {
 		},
 		{
 			name:       "non-gemini format fails closed",
-			mutate:     func(r *inference.Request) { r.Model.APIFormat = inference.APIFormatOpenAI },
+			mutate:     func(r *inference.Request) { r.Model.APIFormat = model.APIFormatOpenAI },
 			wantValErr: true,
 		},
 	}
@@ -418,15 +421,15 @@ func TestGeminiPreIOGuards(t *testing.T) {
 			assert := func(t *testing.T, err error) {
 				t.Helper()
 				if tt.wantMM {
-					var mm *inference.ModelMismatchError
+					var mm *failure.ModelMismatchError
 					if !errors.As(err, &mm) {
-						t.Fatalf("err = %T, want *inference.ModelMismatchError", err)
+						t.Fatalf("err = %T, want *failure.ModelMismatchError", err)
 					}
 				}
 				if tt.wantValErr {
-					var ve *inference.ValidationError
+					var ve *model.ValidationError
 					if !errors.As(err, &ve) {
-						t.Fatalf("err = %T, want *inference.ValidationError", err)
+						t.Fatalf("err = %T, want *model.ValidationError", err)
 					}
 				}
 			}
@@ -482,7 +485,7 @@ func TestGeminiNew(t *testing.T) {
 				if !errors.As(err, &are) {
 					t.Fatalf("err = %T, want *llm.AuthRequiredError", err)
 				}
-				if are.Provider != llm.ProviderGoogle || are.Kind != inference.AuthAPIKey {
+				if are.Provider != llm.ProviderGoogle || are.Kind != auth.AuthAPIKey {
 					t.Errorf("AuthRequiredError = {%q, %q}, want {google, api_key}", are.Provider, are.Kind)
 				}
 				return

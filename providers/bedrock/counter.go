@@ -16,18 +16,23 @@ import (
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
+	inferauth "github.com/looprig/inference/auth"
 	"github.com/looprig/inference/codec/anthropicapi"
+	contextcount "github.com/looprig/inference/contextcount"
+	failure "github.com/looprig/inference/failure"
+	model "github.com/looprig/inference/model"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/auth"
 )
 
 const (
-	counterTokenizerRevision      inference.TokenizerRevision = "aws-bedrock-count-tokens-2023-09-30-invoke-model-v1"
-	bedrockSecurityPolicyRevision                             = "aws-bedrock-runtime-sigv4-tls-v1"
-	maxCountResponseBodyBytes                                 = 64 << 10
-	maxBedrockModelIDBytes                                    = 256
-	maxInvokeModelTokensBodyBytes int                         = 25_000_000
-	defaultCounterTimeout                                     = 60 * time.Second
+	counterTokenizerRevision      contextcount.TokenizerRevision = "aws-bedrock-count-tokens-2023-09-30-invoke-model-v1"
+	bedrockSecurityPolicyRevision                                = "aws-bedrock-runtime-sigv4-tls-v1"
+	maxCountResponseBodyBytes                                    = 64 << 10
+	maxBedrockModelIDBytes                                       = 256
+	maxInvokeModelTokensBodyBytes int                            = 25_000_000
+	defaultCounterTimeout                                        = 60 * time.Second
 )
 
 // Counter is a separately constructed exact Bedrock CountTokens client. Keeping
@@ -37,19 +42,19 @@ type Counter struct {
 	region      string
 	endpoint    string
 	endpointErr *CounterEndpointError
-	signer      inference.Authenticator
+	signer      inferauth.Authenticator
 	hc          requestDoer
 	timeout     time.Duration
 }
 
-var _ inference.ContextCounter = (*Counter)(nil)
+var _ contextcount.ContextCounter = (*Counter)(nil)
 
 type requestDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
 // NewCounter constructs an exact provider counter bound to one AWS region.
-func NewCounter(creds auth.SigV4Credentials, region string) (inference.ContextCounter, error) {
+func NewCounter(creds auth.SigV4Credentials, region string) (contextcount.ContextCounter, error) {
 	if err := validateConfig(creds, region); err != nil {
 		return nil, err
 	}
@@ -75,32 +80,32 @@ func newCounter(creds auth.SigV4Credentials, region, endpoint string) *Counter {
 // CountContext sends the byte-identical InvokeModel body in AWS's base64 binary
 // CountTokens envelope. Unsupported models remain provider API errors; this
 // exact counter never falls back to an estimate.
-func (c *Counter) CountContext(ctx context.Context, req inference.Request) (inference.ContextCount, error) {
+func (c *Counter) CountContext(ctx context.Context, req inference.Request) (contextcount.ContextCount, error) {
 	if err := c.validateState(ctx); err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	counterCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	body, err := c.preflight(req)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	httpReq, err := buildRuntimeRequest(counterCtx, c.endpoint, req.Model.Name, pathCountSuffix, body)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	if err := c.signer.Authorize(counterCtx, httpReq); err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
 	count, err := c.do(httpReq)
 	if err != nil {
-		return inference.ContextCount{}, err
+		return contextcount.ContextCount{}, err
 	}
-	return inference.ContextCount{
+	return contextcount.ContextCount{
 		Model:       req.Model.Key(),
 		InputTokens: count,
-		Quality:     inference.CountQualityExactProvider,
+		Quality:     contextcount.CountQualityExactProvider,
 	}, nil
 }
 
@@ -144,12 +149,12 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 		return nil, err
 	}
 	if !validBedrockModelID(req.Model.Name) {
-		return nil, &inference.ValidationError{
+		return nil, &model.ValidationError{
 			Field:  "Name",
 			Reason: "Bedrock model id must be 1-256 ASCII letters, digits, underscore, dot, hyphen, slash, or colon",
 		}
 	}
-	if req.Model.APIFormat != inference.APIFormatAnthropic {
+	if req.Model.APIFormat != model.APIFormatAnthropic {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
 	encoded, err := anthropicapi.EncodeRequest(req, false)
@@ -178,15 +183,15 @@ func buildCountRequestEnvelope(invokeBody []byte) ([]byte, error) {
 	return body, nil
 }
 
-func (c *Counter) checkBinding(model inference.Model) error {
-	if llm.Provider(model.Provider) == llm.ProviderBedrock && model.BaseURL == "" {
+func (c *Counter) checkBinding(m model.Model) error {
+	if llm.Provider(m.Provider) == llm.ProviderBedrock && m.BaseURL == "" {
 		return nil
 	}
-	return &inference.ModelMismatchError{
-		BoundProvider:   inference.ProviderName(llm.ProviderBedrock),
-		RequestProvider: model.Provider,
+	return &failure.ModelMismatchError{
+		BoundProvider:   model.ProviderName(llm.ProviderBedrock),
+		RequestProvider: m.Provider,
 		BoundEndpoint:   c.endpoint,
-		RequestEndpoint: model.BaseURL,
+		RequestEndpoint: m.BaseURL,
 	}
 }
 
@@ -223,7 +228,7 @@ type invokeModelTokensRequest struct {
 func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
 	response, err := c.hc.Do(req)
 	if err != nil {
-		return 0, &inference.NetworkError{Err: err}
+		return 0, &failure.NetworkError{Err: err}
 	}
 	if response == nil || response.Body == nil {
 		return 0, &CounterResponseError{Reason: CounterResponseMalformed}
@@ -231,10 +236,10 @@ func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
 	defer response.Body.Close()
 	body, tooLarge, err := readCountResponseBody(response.Body)
 	if err != nil {
-		return 0, &inference.NetworkError{Err: err}
+		return 0, &failure.NetworkError{Err: err}
 	}
 	if response.StatusCode/100 != 2 {
-		return 0, &inference.APIError{
+		return 0, &failure.APIError{
 			Status:  response.StatusCode,
 			Message: http.StatusText(response.StatusCode),
 			Body:    body,
@@ -327,25 +332,25 @@ func rejectDuplicateCount(body []byte) error {
 func (c countScalar) tokenCount() (content.TokenCount, error) {
 	raw := bytes.TrimSpace(c.raw)
 	if bytes.Equal(raw, []byte("null")) {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonNull)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonNull)
 	}
 	if !countNumber(raw) {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonInvalidType)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonInvalidType)
 	}
 	if bytes.ContainsAny(raw, ".eE") {
-		return 0, countNormalizationError(inference.UsageNormalizationReasonFractional)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonFractional)
 	}
 	value, err := strconv.ParseInt(string(raw), 10, 64)
 	if err != nil {
 		if errors.Is(err, strconv.ErrRange) {
-			return 0, countNormalizationError(inference.UsageNormalizationReasonOutOfRange)
+			return 0, countNormalizationError(usage.UsageNormalizationReasonOutOfRange)
 		}
-		return 0, countNormalizationError(inference.UsageNormalizationReasonInvalidType)
+		return 0, countNormalizationError(usage.UsageNormalizationReasonInvalidType)
 	}
 	if value < 0 {
-		return 0, &inference.UsageNormalizationError{
-			Field:  inference.UsageNormalizationFieldInputTokens,
-			Reason: inference.UsageNormalizationReasonNegative,
+		return 0, &usage.UsageNormalizationError{
+			Field:  usage.UsageNormalizationFieldInputTokens,
+			Reason: usage.UsageNormalizationReasonNegative,
 			Value:  value,
 		}
 	}
@@ -356,32 +361,32 @@ func countNumber(raw []byte) bool {
 	return len(raw) > 0 && (raw[0] == '-' || raw[0] >= '0' && raw[0] <= '9')
 }
 
-func countNormalizationError(reason inference.UsageNormalizationReason) error {
-	return &inference.UsageNormalizationError{
-		Field:  inference.UsageNormalizationFieldInputTokens,
+func countNormalizationError(reason usage.UsageNormalizationReason) error {
+	return &usage.UsageNormalizationError{
+		Field:  usage.UsageNormalizationFieldInputTokens,
 		Reason: reason,
 	}
 }
 
 // CounterCapability declares the CountTokens endpoint as the same region-routed
 // Bedrock Runtime security boundary as InvokeModel.
-func (c *Counter) CounterCapability() inference.CounterCapability {
+func (c *Counter) CounterCapability() contextcount.CounterCapability {
 	if c == nil || c.validateConfiguration() != nil {
-		return inference.CounterCapability{}
+		return contextcount.CounterCapability{}
 	}
-	return inference.CounterCapability{
-		Provider:         inference.ProviderID(llm.ProviderBedrock),
-		Transport:        inference.CounterTransportSameEndpoint,
+	return contextcount.CounterCapability{
+		Provider:         contextcount.ProviderID(llm.ProviderBedrock),
+		Transport:        contextcount.CounterTransportSameEndpoint,
 		SecurityIdentity: counterSecurityIdentity(c.region, c.endpoint),
-		Retention:        inference.RetentionLogged,
+		Retention:        contextcount.RetentionLogged,
 		TokenizerRev:     counterTokenizerRevision,
-		Quality:          inference.CountQualityExactProvider,
+		Quality:          contextcount.CountQualityExactProvider,
 	}
 }
 
-func counterSecurityIdentity(region, endpoint string) inference.SecurityIdentity {
+func counterSecurityIdentity(region, endpoint string) contextcount.SecurityIdentity {
 	material := "provider=bedrock\nregion=" + region + "\nendpoint=" + endpoint + "\nauth=sigv4\ntransport=tls\npolicy=" + bedrockSecurityPolicyRevision
-	return inference.SecurityIdentity(sha256.Sum256([]byte(material)))
+	return contextcount.SecurityIdentity(sha256.Sum256([]byte(material)))
 }
 
 func canonicalCounterEndpoint(endpoint string) (string, *CounterEndpointError) {

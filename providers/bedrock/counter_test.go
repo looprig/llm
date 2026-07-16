@@ -19,11 +19,15 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/codec/anthropicapi"
+	contextcount "github.com/looprig/inference/contextcount"
+	failure "github.com/looprig/inference/failure"
+	model "github.com/looprig/inference/model"
+	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/auth"
 )
 
-var _ inference.ContextCounter = (*Counter)(nil)
+var _ contextcount.ContextCounter = (*Counter)(nil)
 
 const counterModelID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
@@ -53,7 +57,7 @@ func TestCounterEnvelopeMatchesInvokeBody(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CountContext() error = %v", err)
 			}
-			if got != (inference.ContextCount{Model: tt.req.Model.Key(), InputTokens: 37, Quality: inference.CountQualityExactProvider}) {
+			if got != (contextcount.ContextCount{Model: tt.req.Model.Key(), InputTokens: 37, Quality: contextcount.CountQualityExactProvider}) {
 				t.Errorf("CountContext() = %+v, want exact count 37 for request model", got)
 			}
 
@@ -152,7 +156,7 @@ func TestCounterPreflightRejectsBeforeIO(t *testing.T) {
 		wantValid  bool
 		wantFormat bool
 	}{
-		{name: "provider mismatch", mutate: func(r *inference.Request) { r.Model.Provider = inference.ProviderName(llm.ProviderGoogle) }, wantModel: true},
+		{name: "provider mismatch", mutate: func(r *inference.Request) { r.Model.Provider = model.ProviderName(llm.ProviderGoogle) }, wantModel: true},
 		{name: "missing model name", mutate: func(r *inference.Request) { r.Model.Name = "" }, wantValid: true},
 		{name: "model name contains query delimiter", mutate: func(r *inference.Request) { r.Model.Name = "model?credential" }, wantValid: true},
 		{name: "model name exceeds AWS limit", mutate: func(r *inference.Request) { r.Model.Name = strings.Repeat("a", 257) }, wantValid: true},
@@ -172,15 +176,15 @@ func TestCounterPreflightRejectsBeforeIO(t *testing.T) {
 			tt.mutate(&req)
 			_, err := counter.CountContext(context.Background(), req)
 			if tt.wantModel {
-				var target *inference.ModelMismatchError
+				var target *failure.ModelMismatchError
 				if !errors.As(err, &target) {
-					t.Fatalf("error = %T, want *inference.ModelMismatchError", err)
+					t.Fatalf("error = %T, want *failure.ModelMismatchError", err)
 				}
 			}
 			if tt.wantValid {
-				var target *inference.ValidationError
+				var target *model.ValidationError
 				if !errors.As(err, &target) {
-					t.Fatalf("error = %T, want *inference.ValidationError", err)
+					t.Fatalf("error = %T, want *model.ValidationError", err)
 				}
 			}
 			if tt.wantFormat {
@@ -229,9 +233,9 @@ func TestCounterEndpointBinding(t *testing.T) {
 				&content.AudioBlock{MediaType: content.MediaType("audio/wav"), Data: []byte("not encoded")},
 			}
 			_, err := counter.CountContext(context.Background(), req)
-			var mismatch *inference.ModelMismatchError
+			var mismatch *failure.ModelMismatchError
 			if !errors.As(err, &mismatch) {
-				t.Fatalf("CountContext() error = %T, want *inference.ModelMismatchError before encoding", err)
+				t.Fatalf("CountContext() error = %T, want *failure.ModelMismatchError before encoding", err)
 			}
 			if mismatch.BoundEndpoint != counter.endpoint {
 				t.Errorf("BoundEndpoint = %q, want %q", mismatch.BoundEndpoint, counter.endpoint)
@@ -359,18 +363,18 @@ func TestCounterResponseRejectsAmbiguity(t *testing.T) {
 		name       string
 		body       string
 		wantReason CounterResponseReason
-		wantNorm   inference.UsageNormalizationReason
+		wantNorm   usage.UsageNormalizationReason
 		secret     string
 	}{
 		{name: "missing", body: `{}`, wantReason: CounterResponseMissingCount},
-		{name: "null", body: `{"inputTokens":null}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonNull},
-		{name: "fractional", body: `{"inputTokens":1.5}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonFractional},
-		{name: "exponent", body: `{"inputTokens":1e3}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonFractional},
-		{name: "negative", body: `{"inputTokens":-1}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonNegative},
-		{name: "positive out of range", body: `{"inputTokens":9223372036854775808}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonOutOfRange},
-		{name: "negative out of range", body: `{"inputTokens":-9223372036854775809}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonOutOfRange},
-		{name: "string", body: `{"inputTokens":"provider-secret-value"}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonInvalidType, secret: "provider-secret-value"},
-		{name: "boolean", body: `{"inputTokens":true}`, wantReason: CounterResponseInvalidCount, wantNorm: inference.UsageNormalizationReasonInvalidType},
+		{name: "null", body: `{"inputTokens":null}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonNull},
+		{name: "fractional", body: `{"inputTokens":1.5}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonFractional},
+		{name: "exponent", body: `{"inputTokens":1e3}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonFractional},
+		{name: "negative", body: `{"inputTokens":-1}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonNegative},
+		{name: "positive out of range", body: `{"inputTokens":9223372036854775808}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonOutOfRange},
+		{name: "negative out of range", body: `{"inputTokens":-9223372036854775809}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonOutOfRange},
+		{name: "string", body: `{"inputTokens":"provider-secret-value"}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonInvalidType, secret: "provider-secret-value"},
+		{name: "boolean", body: `{"inputTokens":true}`, wantReason: CounterResponseInvalidCount, wantNorm: usage.UsageNormalizationReasonInvalidType},
 		{name: "duplicate exact", body: `{"inputTokens":1,"inputTokens":2}`, wantReason: CounterResponseDuplicateField},
 		{name: "duplicate case variant", body: `{"inputTokens":1,"InputTokens":2}`, wantReason: CounterResponseDuplicateField},
 		{name: "malformed", body: `{"inputTokens":`, wantReason: CounterResponseMalformed},
@@ -388,11 +392,11 @@ func TestCounterResponseRejectsAmbiguity(t *testing.T) {
 				t.Errorf("reason = %q, want %q", responseErr.Reason, tt.wantReason)
 			}
 			if tt.wantNorm != "" {
-				var norm *inference.UsageNormalizationError
+				var norm *usage.UsageNormalizationError
 				if !errors.As(err, &norm) {
-					t.Fatalf("error chain lacks *inference.UsageNormalizationError: %v", err)
+					t.Fatalf("error chain lacks *usage.UsageNormalizationError: %v", err)
 				}
-				if norm.Field != inference.UsageNormalizationFieldInputTokens || norm.Reason != tt.wantNorm {
+				if norm.Field != usage.UsageNormalizationFieldInputTokens || norm.Reason != tt.wantNorm {
 					t.Errorf("normalization = %+v, want InputTokens/%s", norm, tt.wantNorm)
 				}
 			}
@@ -430,9 +434,9 @@ func TestCounterHTTPFailures(t *testing.T) {
 			counter := newCounter(counterTestCreds(), "us-east-1", srv.URL)
 			_, err := counter.CountContext(context.Background(), counterRequest(counterModelID))
 			if tt.wantAPI {
-				var apiErr *inference.APIError
+				var apiErr *failure.APIError
 				if !errors.As(err, &apiErr) {
-					t.Fatalf("error = %T, want *inference.APIError", err)
+					t.Fatalf("error = %T, want *failure.APIError", err)
 				}
 				if apiErr.Status != tt.status {
 					t.Errorf("status = %d, want %d", apiErr.Status, tt.status)
@@ -510,9 +514,9 @@ func TestCounterContextAndTransportFailures(t *testing.T) {
 				return
 			}
 			if tt.wantNetwork {
-				var networkErr *inference.NetworkError
+				var networkErr *failure.NetworkError
 				if !errors.As(err, &networkErr) {
-					t.Fatalf("error = %T, want *inference.NetworkError", err)
+					t.Fatalf("error = %T, want *failure.NetworkError", err)
 				}
 			}
 			if !errors.Is(err, tt.wantCause) {
@@ -545,9 +549,9 @@ func TestCounterReadAndNetworkFailures(t *testing.T) {
 			counter := newCounter(counterTestCreds(), "us-east-1", "https://bedrock-runtime.us-east-1.amazonaws.com")
 			counter.hc = tt.doer
 			_, err := counter.CountContext(context.Background(), counterRequest(counterModelID))
-			var networkErr *inference.NetworkError
+			var networkErr *failure.NetworkError
 			if !errors.As(err, &networkErr) {
-				t.Fatalf("error = %T, want *inference.NetworkError", err)
+				t.Fatalf("error = %T, want *failure.NetworkError", err)
 			}
 			if !errors.Is(err, tt.wantCause) {
 				t.Errorf("error = %v, want cause", err)
@@ -579,7 +583,7 @@ func TestCounterStateIsFailClosed(t *testing.T) {
 			if !errors.As(err, &stateErr) || stateErr.Reason != tt.wantReason {
 				t.Fatalf("error = %v, want state %q", err, tt.wantReason)
 			}
-			if got := tt.counter.CounterCapability(); got != (inference.CounterCapability{}) {
+			if got := tt.counter.CounterCapability(); got != (contextcount.CounterCapability{}) {
 				t.Errorf("capability = %+v, want zero for invalid state", got)
 			}
 		})
@@ -609,7 +613,7 @@ func TestCounterCapability(t *testing.T) {
 			if err := got.Validate(); err != nil {
 				t.Fatalf("capability Validate() error = %v", err)
 			}
-			if got.Provider != inference.ProviderID(llm.ProviderBedrock) || got.Transport != inference.CounterTransportSameEndpoint || got.Retention != inference.RetentionLogged || got.Quality != inference.CountQualityExactProvider || got.TokenizerRev == "" {
+			if got.Provider != contextcount.ProviderID(llm.ProviderBedrock) || got.Transport != contextcount.CounterTransportSameEndpoint || got.Retention != contextcount.RetentionLogged || got.Quality != contextcount.CountQualityExactProvider || got.TokenizerRev == "" {
 				t.Errorf("capability = %+v, want Bedrock/same-endpoint/logged/exact/pinned", got)
 			}
 			if tt.wantEqual != nil && got != tt.wantEqual.CounterCapability() {
@@ -674,7 +678,7 @@ func TestCounterConstructionAndClientSeparation(t *testing.T) {
 			if clientErr != nil {
 				t.Fatalf("New() error = %v", clientErr)
 			}
-			if _, ok := client.(inference.ContextCounter); ok {
+			if _, ok := client.(contextcount.ContextCounter); ok {
 				t.Fatal("ordinary Client unexpectedly implements ContextCounter")
 			}
 		})
@@ -776,20 +780,20 @@ func richCounterRequest(modelID string) inference.Request {
 		&content.AIMessage{Message: content.Message{Role: content.RoleAssistant, Blocks: []content.Block{&content.TextBlock{Text: "I can help."}}}},
 		&content.UserMessage{Message: content.Message{Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "Count all fields."}}}},
 	)
-	req.Override = &inference.Sampling{MaxTokens: counterIntPtr(321)}
+	req.Override = &model.Sampling{MaxTokens: counterIntPtr(321)}
 	return req
 }
 
 func counterRequest(name string) inference.Request {
 	return inference.Request{
-		Model: inference.CustomModel(
-			inference.ProviderName(llm.ProviderBedrock),
-			inference.APIFormatAnthropic,
+		Model: model.CustomModel(
+			model.ProviderName(llm.ProviderBedrock),
+			model.APIFormatAnthropic,
 			"",
 			name,
-			inference.WithContextLimits(inference.ContextLimits{WindowTokens: 200_000}),
-			inference.WithTools(),
-			inference.WithImages(),
+			model.WithContextLimits(model.ContextLimits{WindowTokens: 200_000}),
+			model.WithTools(),
+			model.WithImages(),
 		),
 		Messages: content.AgenticMessages{
 			&content.UserMessage{Message: content.Message{

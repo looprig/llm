@@ -1,9 +1,11 @@
-package inference
+package contextcount
 
 import (
 	"context"
 
 	"github.com/looprig/core/content"
+	"github.com/looprig/inference"
+	"github.com/looprig/inference/model"
 )
 
 // ProviderID identifies the provider or gateway that owns a transport path.
@@ -27,7 +29,7 @@ const (
 
 // ContextCount is the normalized input-token occupancy of one complete request.
 type ContextCount struct {
-	Model       ModelKey
+	Model       model.ModelKey
 	InputTokens content.TokenCount
 	Quality     CountQuality
 }
@@ -35,12 +37,12 @@ type ContextCount struct {
 // ContextCounter counts the complete provider-neutral request and declares its
 // secret-free trust posture without performing I/O.
 type ContextCounter interface {
-	CountContext(context.Context, Request) (ContextCount, error)
+	CountContext(context.Context, inference.Request) (ContextCount, error)
 	CounterCapability() CounterCapability
 }
 
 // ContextCountFunc adapts a function to the ContextCounter contract.
-type ContextCountFunc func(context.Context, Request) (ContextCount, error)
+type ContextCountFunc func(context.Context, inference.Request) (ContextCount, error)
 
 // ContextCounterFunc combines a count function with its fixed trust metadata.
 type ContextCounterFunc struct {
@@ -49,7 +51,7 @@ type ContextCounterFunc struct {
 }
 
 // CountContext calls the count function and rejects structurally invalid results.
-func (c ContextCounterFunc) CountContext(ctx context.Context, req Request) (ContextCount, error) {
+func (c ContextCounterFunc) CountContext(ctx context.Context, req inference.Request) (ContextCount, error) {
 	if c.Count == nil {
 		return ContextCount{}, &ContextCountError{Cause: ErrContextCountFunctionMissing}
 	}
