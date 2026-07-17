@@ -30,6 +30,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -209,7 +210,7 @@ func (f *fakeDoer) handleInference(req *http.Request) (*http.Response, error) {
 	respID := "resp-1"
 	cleartextResp := `{"id":"` + respID + `","object":"chat.completion","model":"` + hdrModel +
 		`","choices":[{"index":0,"message":{"role":"assistant","content":"` + testRespContent +
-		`"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		`"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
 	cleartextRespBytes := mustCompact(f.t, mustParseBody(f.t, cleartextResp))
 
 	sealedResp := mustParseBody(f.t, cleartextResp)
@@ -587,15 +588,20 @@ func TestInvokePreservesStructuredOutputThroughSealing(t *testing.T) {
 		StructuredOutputWithTools: true,
 	}
 	req.Output = testStructuredOutput()
+	wantToolSchema := json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`)
 	req.Tools = []inference.Tool{{
 		Name:        "lookup",
 		Description: "look up a value",
-		Schema:      json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
+		Schema:      wantToolSchema,
 	}}
 	req.ToolChoice = inference.ToolChoiceRequired
 
-	if _, err := client.Invoke(context.Background(), req); err != nil {
+	resp, err := client.Invoke(context.Background(), req)
+	if err != nil {
 		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if resp.FinishReason != stream.FinishReasonStop {
+		t.Errorf("Invoke() FinishReason = %q, want %q", resp.FinishReason, stream.FinishReasonStop)
 	}
 
 	var wire struct {
@@ -610,7 +616,8 @@ func TestInvokePreservesStructuredOutputThroughSealing(t *testing.T) {
 		Tools []struct {
 			Type     string `json:"type"`
 			Function struct {
-				Name string `json:"name"`
+				Name       string          `json:"name"`
+				Parameters json.RawMessage `json:"parameters"`
 			} `json:"function"`
 		} `json:"tools"`
 		ToolChoice string `json:"tool_choice"`
@@ -620,15 +627,32 @@ func TestInvokePreservesStructuredOutputThroughSealing(t *testing.T) {
 	}
 	if wire.ResponseFormat.Type != "json_schema" ||
 		wire.ResponseFormat.JSONSchema.Name != "answer" ||
-		!wire.ResponseFormat.JSONSchema.Strict ||
-		!json.Valid(wire.ResponseFormat.JSONSchema.Schema) {
+		!wire.ResponseFormat.JSONSchema.Strict {
 		t.Errorf("response_format = %+v, want strict json_schema named answer", wire.ResponseFormat)
 	}
+	assertJSONSemanticallyEqual(t, wire.ResponseFormat.JSONSchema.Schema, req.Output.Schema)
 	if len(wire.Tools) != 1 || wire.Tools[0].Type != "function" || wire.Tools[0].Function.Name != "lookup" {
 		t.Errorf("tools = %+v, want one lookup function", wire.Tools)
+	} else {
+		assertJSONSemanticallyEqual(t, wire.Tools[0].Function.Parameters, wantToolSchema)
 	}
 	if wire.ToolChoice != "required" {
 		t.Errorf("tool_choice = %q, want required", wire.ToolChoice)
+	}
+}
+
+func assertJSONSemanticallyEqual(t *testing.T, got, want json.RawMessage) {
+	t.Helper()
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("unmarshal got JSON %q: %v", got, err)
+	}
+	var wantValue any
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("unmarshal want JSON %q: %v", want, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Errorf("JSON = %s, want semantically %s", got, want)
 	}
 }
 

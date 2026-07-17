@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/looprig/inference"
@@ -25,12 +26,13 @@ func TestEncodeRequestPreservesStructuredOutputWithTools(t *testing.T) {
 		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
 		Strict: true,
 	}
+	wantToolSchema := json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`)
 	req := inference.Request{
 		Model:  model.CustomModel("chutes", model.APIFormatOpenAI, "https://api.chutes.ai", "model", model.WithStructuredOutputWithTools()),
 		Output: &output,
 		Tools: []inference.Tool{{
 			Name:   "lookup",
-			Schema: json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
+			Schema: wantToolSchema,
 		}},
 		ToolChoice: inference.ToolChoiceRequired,
 	}
@@ -94,7 +96,8 @@ func TestEncodeRequestPreservesStructuredOutputWithTools(t *testing.T) {
 		} `json:"response_format"`
 		Tools []struct {
 			Function struct {
-				Name string `json:"name"`
+				Name       string          `json:"name"`
+				Parameters json.RawMessage `json:"parameters"`
 			} `json:"function"`
 		} `json:"tools"`
 		ToolChoice    string `json:"tool_choice"`
@@ -103,17 +106,35 @@ func TestEncodeRequestPreservesStructuredOutputWithTools(t *testing.T) {
 	if err := json.Unmarshal(decrypted, &wire); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	if wire.ResponseFormat.Type != "json_schema" || wire.ResponseFormat.JSONSchema.Name != "answer" || !wire.ResponseFormat.JSONSchema.Strict || !json.Valid(wire.ResponseFormat.JSONSchema.Schema) {
+	if wire.ResponseFormat.Type != "json_schema" || wire.ResponseFormat.JSONSchema.Name != "answer" || !wire.ResponseFormat.JSONSchema.Strict {
 		t.Errorf("response_format = %+v, want strict json_schema named answer", wire.ResponseFormat)
 	}
+	assertJSONSemanticallyEqual(t, wire.ResponseFormat.JSONSchema.Schema, output.Schema)
 	if len(wire.Tools) != 1 || wire.Tools[0].Function.Name != "lookup" {
 		t.Errorf("tools = %+v, want one lookup function", wire.Tools)
+	} else {
+		assertJSONSemanticallyEqual(t, wire.Tools[0].Function.Parameters, wantToolSchema)
 	}
 	if wire.ToolChoice != "required" {
 		t.Errorf("tool_choice = %q, want required", wire.ToolChoice)
 	}
 	if wire.E2EResponsePK == "" {
 		t.Error("e2e_response_pk is empty")
+	}
+}
+
+func assertJSONSemanticallyEqual(t *testing.T, got, want json.RawMessage) {
+	t.Helper()
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("unmarshal got JSON %q: %v", got, err)
+	}
+	var wantValue any
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("unmarshal want JSON %q: %v", want, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Errorf("JSON = %s, want semantically %s", got, want)
 	}
 }
 

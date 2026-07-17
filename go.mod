@@ -6,7 +6,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/looprig/core v0.2.0
-	github.com/looprig/inference v0.3.0
+	github.com/looprig/inference v0.3.1-0.20260717213513-ab32a3979f64
 	golang.org/x/crypto v0.52.0
 )
 

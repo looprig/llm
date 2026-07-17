@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
 	failure "github.com/looprig/inference/failure"
+	stream "github.com/looprig/inference/stream"
 
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
@@ -167,18 +169,24 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 	}
 	req.Output = &inference.OutputSchema{
 		Name:   "answer",
-		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"},"details":{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}},"required":["answer","details"],"additionalProperties":false}`),
 		Strict: true,
 	}
+	wantProjectedSchema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"},"details":{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}},"required":["answer","details"]}`)
+	wantToolSchema := json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`)
 	req.Tools = []inference.Tool{{
 		Name:   "lookup",
-		Schema: json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
+		Schema: wantToolSchema,
 	}}
 	req.ToolChoice = inference.ToolChoiceRequired
 
 	c := gemini.NewWithEndpoint(testKey, srv.URL)
-	if _, err := c.Invoke(context.Background(), req); err != nil {
+	resp, err := c.Invoke(context.Background(), req)
+	if err != nil {
 		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if resp.FinishReason != stream.FinishReasonStop {
+		t.Errorf("Invoke() FinishReason = %q, want %q", resp.FinishReason, stream.FinishReasonStop)
 	}
 
 	var wire struct {
@@ -188,7 +196,8 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 		} `json:"generationConfig"`
 		Tools []struct {
 			FunctionDeclarations []struct {
-				Name string `json:"name"`
+				Name       string          `json:"name"`
+				Parameters json.RawMessage `json:"parameters"`
 			} `json:"functionDeclarations"`
 		} `json:"tools"`
 		ToolConfig struct {
@@ -200,14 +209,32 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 	if err := json.Unmarshal(<-bodyCh, &wire); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	if wire.GenerationConfig.ResponseMIMEType != "application/json" || !json.Valid(wire.GenerationConfig.ResponseJSONSchema) {
+	if wire.GenerationConfig.ResponseMIMEType != "application/json" {
 		t.Errorf("generationConfig = %+v, want JSON MIME type and schema", wire.GenerationConfig)
 	}
+	assertJSONSemanticallyEqual(t, wire.GenerationConfig.ResponseJSONSchema, wantProjectedSchema)
 	if len(wire.Tools) != 1 || len(wire.Tools[0].FunctionDeclarations) != 1 || wire.Tools[0].FunctionDeclarations[0].Name != "lookup" {
 		t.Errorf("tools = %+v, want one lookup declaration", wire.Tools)
+	} else {
+		assertJSONSemanticallyEqual(t, wire.Tools[0].FunctionDeclarations[0].Parameters, wantToolSchema)
 	}
 	if wire.ToolConfig.FunctionCallingConfig.Mode != "ANY" {
 		t.Errorf("toolConfig mode = %q, want ANY", wire.ToolConfig.FunctionCallingConfig.Mode)
+	}
+}
+
+func assertJSONSemanticallyEqual(t *testing.T, got, want json.RawMessage) {
+	t.Helper()
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("unmarshal got JSON %q: %v", got, err)
+	}
+	var wantValue any
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("unmarshal want JSON %q: %v", want, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Errorf("JSON = %s, want semantically %s", got, want)
 	}
 }
 
