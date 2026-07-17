@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -141,6 +142,72 @@ func TestGeminiInvoke(t *testing.T) {
 	}
 	if !strings.Contains(string(got.body), `"contents"`) {
 		t.Errorf("body = %s, want a JSON body containing \"contents\"", got.body)
+	}
+}
+
+// TestGeminiInvokePreservesStructuredOutputWithTools captures the bespoke
+// provider client's body and proves its preflight path retains every field the
+// shared Gemini codec emits for the combined feature.
+func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
+	t.Parallel()
+
+	bodyCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyCh <- readAll(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, geminiResponseJSON)
+	}))
+	defer srv.Close()
+
+	req := geminiRequest("gemini-3-pro-preview")
+	req.Model.Caps = model.Capabilities{
+		Tools:                     true,
+		StructuredOutput:          true,
+		StructuredOutputWithTools: true,
+	}
+	req.Output = &inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
+	}
+	req.Tools = []inference.Tool{{
+		Name:   "lookup",
+		Schema: json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
+	}}
+	req.ToolChoice = inference.ToolChoiceRequired
+
+	c := gemini.NewWithEndpoint(testKey, srv.URL)
+	if _, err := c.Invoke(context.Background(), req); err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+
+	var wire struct {
+		GenerationConfig struct {
+			ResponseMIMEType   string          `json:"responseMimeType"`
+			ResponseJSONSchema json.RawMessage `json:"responseJsonSchema"`
+		} `json:"generationConfig"`
+		Tools []struct {
+			FunctionDeclarations []struct {
+				Name string `json:"name"`
+			} `json:"functionDeclarations"`
+		} `json:"tools"`
+		ToolConfig struct {
+			FunctionCallingConfig struct {
+				Mode string `json:"mode"`
+			} `json:"functionCallingConfig"`
+		} `json:"toolConfig"`
+	}
+	if err := json.Unmarshal(<-bodyCh, &wire); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if wire.GenerationConfig.ResponseMIMEType != "application/json" || !json.Valid(wire.GenerationConfig.ResponseJSONSchema) {
+		t.Errorf("generationConfig = %+v, want JSON MIME type and schema", wire.GenerationConfig)
+	}
+	if len(wire.Tools) != 1 || len(wire.Tools[0].FunctionDeclarations) != 1 || wire.Tools[0].FunctionDeclarations[0].Name != "lookup" {
+		t.Errorf("tools = %+v, want one lookup declaration", wire.Tools)
+	}
+	if wire.ToolConfig.FunctionCallingConfig.Mode != "ANY" {
+		t.Errorf("toolConfig mode = %q, want ANY", wire.ToolConfig.FunctionCallingConfig.Mode)
 	}
 }
 

@@ -84,6 +84,14 @@ func TestBedrockBodyTransformPreservesCodecOutput(t *testing.T) {
 	t.Parallel()
 
 	req := bedrockRequest("anthropic.claude-3-5-sonnet-20241022-v2:0")
+	req.Model.Caps.StructuredOutput = true
+	req.Model.Caps.Thinking = true
+	req.Model.Sampling.Effort = model.EffortHigh
+	req.Output = &inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
+	}
 	// The client encodes the invoke body via the free anthropicapi.EncodeRequest
 	// (stream=false); use the same free function here so the cross-check compares
 	// against the exact bytes the client rewrites.
@@ -126,6 +134,54 @@ func TestBedrockBodyTransformPreservesCodecOutput(t *testing.T) {
 	if len(bedrockFields) != len(anthropicFields) {
 		// -model +anthropic_version nets to the same count.
 		t.Errorf("field count = %d, want %d (=anthropic count; -model +anthropic_version)", len(bedrockFields), len(anthropicFields))
+	}
+}
+
+// TestBedrockBodyTransformPreservesStructuredOutputAndEffort proves the Bedrock
+// rewrite retains Anthropic's combined output_config object while changing only
+// the transport-specific model/version fields.
+func TestBedrockBodyTransformPreservesStructuredOutputAndEffort(t *testing.T) {
+	t.Parallel()
+
+	req := bedrockRequest("anthropic.claude-3-5-sonnet-20241022-v2:0")
+	req.Model.Caps.StructuredOutput = true
+	req.Model.Caps.Thinking = true
+	req.Model.Sampling.Effort = model.EffortHigh
+	req.Output = &inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
+	}
+
+	srv, bodyCh := bodyCaptureServer(t)
+	defer srv.Close()
+	c := bedrock.NewWithEndpoint(testCreds(), "us-east-1", srv.URL)
+	if _, err := c.Invoke(context.Background(), req); err != nil {
+		t.Fatalf("Invoke() err = %v, want nil", err)
+	}
+
+	var wire struct {
+		Model            json.RawMessage `json:"model"`
+		AnthropicVersion string          `json:"anthropic_version"`
+		OutputConfig     struct {
+			Effort string `json:"effort"`
+			Format struct {
+				Type   string          `json:"type"`
+				Schema json.RawMessage `json:"schema"`
+			} `json:"format"`
+		} `json:"output_config"`
+	}
+	if err := json.Unmarshal(<-bodyCh, &wire); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if wire.Model != nil {
+		t.Errorf("model = %s, want omitted", wire.Model)
+	}
+	if wire.AnthropicVersion != "bedrock-2023-05-31" {
+		t.Errorf("anthropic_version = %q", wire.AnthropicVersion)
+	}
+	if wire.OutputConfig.Effort != "high" || wire.OutputConfig.Format.Type != "json_schema" || !json.Valid(wire.OutputConfig.Format.Schema) {
+		t.Errorf("output_config = %+v, want effort high and valid json_schema format", wire.OutputConfig)
 	}
 }
 

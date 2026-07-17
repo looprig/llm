@@ -153,6 +153,7 @@ type fakeDoer struct {
 	stream bool
 
 	receipt     []byte // set during POST, returned on the receipt GET
+	cleartext   []byte // decrypted request body, captured before response handling
 	sawAuthPost bool
 	sawAuthGet  bool
 }
@@ -196,6 +197,7 @@ func (f *fakeDoer) handleInference(req *http.Request) (*http.Response, error) {
 	// CompactJSON — this is byte-for-byte the cleartext the client compacted
 	// before sealing (the receipt's body_hash preimage).
 	cleartextReqBody := f.openRequest(sealedBody, hdrModel, nonce, ts)
+	f.cleartext = append(f.cleartext[:0], cleartextReqBody...)
 
 	if f.stream {
 		return f.handleStreamInference(cleartextReqBody, clientPub, hdrModel, nonce, ts)
@@ -564,6 +566,76 @@ func TestInvokeHappyPath(t *testing.T) {
 	}
 	if !doer.sawAuthGet {
 		t.Errorf("receipt GET did not carry the bearer token")
+	}
+}
+
+// TestInvokePreservesStructuredOutputThroughSealing proves the ACI extension
+// keeps the OpenAI structured-output and ordinary-tool fields intact through
+// the real request sealing path. The fake gateway decrypts the body before it
+// builds the response, so the assertion observes exactly what the enclave sees.
+func TestInvokePreservesStructuredOutputThroughSealing(t *testing.T) {
+	t.Parallel()
+
+	keys := newGatewayKeys(t)
+	doer := &fakeDoer{t: t, keys: keys}
+	client := newTestClient(t, doer, keys)
+	req := testRequest()
+	req.Model.Caps = model.Capabilities{
+		Tools:                     true,
+		StructuredOutput:          true,
+		StructuredOutputWithTools: true,
+	}
+	req.Output = testStructuredOutput()
+	req.Tools = []inference.Tool{{
+		Name:        "lookup",
+		Description: "look up a value",
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
+	}}
+	req.ToolChoice = inference.ToolChoiceRequired
+
+	if _, err := client.Invoke(context.Background(), req); err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+
+	var wire struct {
+		ResponseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name   string          `json:"name"`
+				Strict bool            `json:"strict"`
+				Schema json.RawMessage `json:"schema"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
+		Tools []struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		ToolChoice string `json:"tool_choice"`
+	}
+	if err := json.Unmarshal(doer.cleartext, &wire); err != nil {
+		t.Fatalf("unmarshal decrypted request: %v", err)
+	}
+	if wire.ResponseFormat.Type != "json_schema" ||
+		wire.ResponseFormat.JSONSchema.Name != "answer" ||
+		!wire.ResponseFormat.JSONSchema.Strict ||
+		!json.Valid(wire.ResponseFormat.JSONSchema.Schema) {
+		t.Errorf("response_format = %+v, want strict json_schema named answer", wire.ResponseFormat)
+	}
+	if len(wire.Tools) != 1 || wire.Tools[0].Type != "function" || wire.Tools[0].Function.Name != "lookup" {
+		t.Errorf("tools = %+v, want one lookup function", wire.Tools)
+	}
+	if wire.ToolChoice != "required" {
+		t.Errorf("tool_choice = %q, want required", wire.ToolChoice)
+	}
+}
+
+func testStructuredOutput() *inference.OutputSchema {
+	return &inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
 	}
 }
 

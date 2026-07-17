@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,6 +83,39 @@ func TestModelAPIFormatSelectsCodecEndToEnd(t *testing.T) {
 	// these would be byte-identical.
 	if bytes.Equal(bodies[model.APIFormatOpenAI], bodies[model.APIFormatAnthropic]) {
 		t.Fatalf("APIFormat did not change the wire body; both encoded to:\n%s", bodies[model.APIFormatOpenAI])
+	}
+}
+
+// TestCustomZeroCapabilityModelRejectsStructuredOutputBeforeIO proves custom,
+// unverified capability metadata defaults closed: requesting Output on a model
+// that did not advertise it returns the typed gate error without one HTTP call.
+func TestCustomZeroCapabilityModelRejectsStructuredOutputBeforeIO(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderLMStudio), model.APIFormatOpenAI, srv.URL, "unverified-model")
+	client, err := New(selected, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	output := inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
+	}
+	_, err = client.Invoke(context.Background(), inference.Request{Model: selected, Output: &output})
+	var unsupported *inference.StructuredOutputUnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("Invoke() error = %T %v, want *StructuredOutputUnsupportedError", err, err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("HTTP request count = %d, want 0", got)
 	}
 }
 
