@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -637,6 +638,77 @@ func testStructuredOutput() *inference.OutputSchema {
 		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
 		Strict: true,
 	}
+}
+
+// TestStructuredOutputValidationPrecedesProviderIO proves both public entry
+// points reject an unsupported structured-output request before consulting the
+// attestation cache or constructing any gateway request. The attestation seam
+// deliberately returns a different error so an ordering regression cannot
+// accidentally satisfy the typed-error assertion.
+func TestStructuredOutputValidationPrecedesProviderIO(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		call func(inference.Client, inference.Request) error
+	}{
+		{
+			name: "invoke",
+			call: func(client inference.Client, req inference.Request) error {
+				_, err := client.Invoke(context.Background(), req)
+				return err
+			},
+		},
+		{
+			name: "stream",
+			call: func(client inference.Client, req inference.Request) error {
+				_, err := client.Stream(context.Background(), req)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var attestCalls atomic.Int32
+			transport := &countingErrorDoer{err: errors.New("unexpected provider I/O")}
+			attest := func(context.Context, string) (*VerifiedReport, error) {
+				attestCalls.Add(1)
+				return nil, errors.New("unexpected attestation")
+			}
+			client, err := New(testBaseURL, testAPIKey, UnpinnedPolicy(),
+				WithHTTPDoer(transport), WithNow(testNow), WithAttestFunc(attest))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := testRequest()
+			req.Output = testStructuredOutput()
+
+			err = tt.call(client, req)
+			var unsupported *inference.StructuredOutputUnsupportedError
+			if !errors.As(err, &unsupported) {
+				t.Errorf("error = %T (%v), want *inference.StructuredOutputUnsupportedError", err, err)
+			}
+			if got := attestCalls.Load(); got != 0 {
+				t.Errorf("attestation calls = %d, want 0", got)
+			}
+			if got := transport.calls.Load(); got != 0 {
+				t.Errorf("gateway transport calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
+type countingErrorDoer struct {
+	calls atomic.Int32
+	err   error
+}
+
+func (d *countingErrorDoer) Do(*http.Request) (*http.Response, error) {
+	d.calls.Add(1)
+	return nil, d.err
 }
 
 // ----------------------------------------------------------------------------

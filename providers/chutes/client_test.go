@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,6 +169,91 @@ func TestClient_ValidateCalledOnStream(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClient_StructuredOutputValidationPrecedesProviderIO proves both public
+// entry points reject an unsupported structured-output request before model
+// resolution, attested-session establishment, or inference transport setup.
+func TestClient_StructuredOutputValidationPrecedesProviderIO(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		call func(*chutes.Client, inference.Request) error
+	}{
+		{
+			name: "invoke",
+			call: func(client *chutes.Client, req inference.Request) error {
+				_, err := client.Invoke(context.Background(), req)
+				return err
+			},
+		},
+		{
+			name: "stream",
+			call: func(client *chutes.Client, req inference.Request) error {
+				_, err := client.Stream(context.Background(), req)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var resolveCalls atomic.Int32
+			var sessionCalls atomic.Int32
+			var inferenceCalls atomic.Int32
+			httpClient := &http.Client{Transport: countingRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.URL.Path == "/v1/models":
+					resolveCalls.Add(1)
+				case strings.HasPrefix(req.URL.Path, "/e2e/instances/") || strings.HasPrefix(req.URL.Path, "/instances/"):
+					sessionCalls.Add(1)
+				case req.URL.Path == "/e2e/invoke":
+					inferenceCalls.Add(1)
+				default:
+					t.Errorf("unexpected provider path %q", req.URL.Path)
+				}
+				return nil, errors.New("unexpected provider I/O")
+			})}
+			client := chutes.New("https://api.chutes.test", "test-key",
+				chutes.WithHTTPClient(httpClient), chutes.WithLLMBase("https://llm.chutes.test"))
+			req := inference.Request{
+				Model:  validChutesModel("test-model"),
+				Output: testChutesStructuredOutput(),
+			}
+
+			err := tt.call(client, req)
+			var unsupported *inference.StructuredOutputUnsupportedError
+			if !errors.As(err, &unsupported) {
+				t.Errorf("error = %T (%v), want *inference.StructuredOutputUnsupportedError", err, err)
+			}
+			if got := resolveCalls.Load(); got != 0 {
+				t.Errorf("resolve HTTP calls = %d, want 0", got)
+			}
+			if got := sessionCalls.Load(); got != 0 {
+				t.Errorf("session HTTP calls = %d, want 0", got)
+			}
+			if got := inferenceCalls.Load(); got != 0 {
+				t.Errorf("inference HTTP calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func testChutesStructuredOutput() *inference.OutputSchema {
+	return &inference.OutputSchema{
+		Name:   "answer",
+		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict: true,
+	}
+}
+
+type countingRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f countingRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // --- enclave helpers for integration-style unit tests ---

@@ -154,9 +154,13 @@ func (s *attestedSession) popNonce() (string, bool) {
 
 // Invoke sends a non-streaming chat completion through the attested e2e channel
 // and returns the decrypted response as a provider-neutral *inference.Response.
-// It calls llm.ValidateModel(req.Model) before any network I/O — fail closed.
+// It validates the model and request features before any network I/O — fail
+// closed.
 func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.Response, error) {
 	if err := llm.ValidateModel(req.Model); err != nil {
+		return nil, err
+	}
+	if err := inference.ValidateRequestFeatures(req); err != nil {
 		return nil, err
 	}
 	chuteID, err := c.resolveChute(ctx, req.Model.Name)
@@ -202,10 +206,14 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 
 // Stream sends a streaming e2e chat request and returns a
 // *stream.StreamReader[content.Chunk] over the decrypted deltas.
-// It calls llm.ValidateModel(req.Model) before any network I/O — fail closed.
+// It validates the model and request features before any network I/O — fail
+// closed.
 // The returned reader MUST be Closed by the caller.
 func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
 	if err := llm.ValidateModel(req.Model); err != nil {
+		return nil, err
+	}
+	if err := inference.ValidateRequestFeatures(req); err != nil {
 		return nil, err
 	}
 	chuteID, err := c.resolveChute(ctx, req.Model.Name)

@@ -239,6 +239,9 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	if err := req.Model.Validate(); err != nil {
 		return nil, err
 	}
+	if err := inference.ValidateRequestFeatures(req); err != nil {
+		return nil, err
+	}
 	model := req.Model.Name
 
 	// 1. Attest (cached). A failure here is already a typed *llm.AttestationError.
@@ -335,6 +338,9 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 // AAD-bound to the attested gateway — carry content authenticity instead.
 func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
 	if err := req.Model.Validate(); err != nil {
+		return nil, err
+	}
+	if err := inference.ValidateRequestFeatures(req); err != nil {
 		return nil, err
 	}
 	model := req.Model.Name
