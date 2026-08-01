@@ -35,6 +35,21 @@ func TestValidateModel(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid openai responses https",
+			model:   model.Model{Provider: pn(llm.ProviderOpenAI), APIFormat: model.APIFormatOpenAIResponses, BaseURL: "https://api.openai.com/v1", Name: "gpt-5"},
+			wantErr: false,
+		},
+		{
+			name:    "valid anthropic messages https",
+			model:   model.Model{Provider: pn(llm.ProviderAnthropic), APIFormat: model.APIFormatAnthropic, BaseURL: "https://api.anthropic.com/v1", Name: "claude-sonnet-4-6"},
+			wantErr: false,
+		},
+		{
+			name:    "valid xai responses https",
+			model:   model.Model{Provider: pn(llm.ProviderXAI), APIFormat: model.APIFormatOpenAIResponses, BaseURL: "https://api.x.ai/v1", Name: "grok-4-5"},
+			wantErr: false,
+		},
+		{
 			name:    "valid lmstudio openai http localhost",
 			model:   model.Model{Provider: pn(llm.ProviderLMStudio), APIFormat: model.APIFormatOpenAI, BaseURL: "http://localhost:1234", Name: "qwen"},
 			wantErr: false,

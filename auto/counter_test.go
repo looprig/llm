@@ -9,7 +9,9 @@ import (
 	contextcount "github.com/looprig/inference/contextcount"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
+	anthropicprovider "github.com/looprig/llm/providers/anthropic"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
+	openaiprovider "github.com/looprig/llm/providers/openai"
 )
 
 func TestNewCounterProviderMatrix(t *testing.T) {
@@ -118,6 +120,68 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 				if supportErr.Provider != tt.provider || supportErr.Reason != tt.supportReason || supportErr.APIFormat != tt.model.APIFormat {
 					t.Errorf("CounterSupportError = %+v, want provider %q reason %q API format %q", supportErr, tt.provider, tt.supportReason, tt.model.APIFormat)
 				}
+			}
+		})
+	}
+}
+
+func TestNewCounterPriorityProviders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		model       model.Model
+		key         auth.APIKey
+		wantType    any
+		wantSupport bool
+	}{
+		{
+			name:     "openai responses exact counter",
+			model:    counterModel(llm.ProviderOpenAI, model.APIFormatOpenAIResponses, ""),
+			key:      "sk-openai-counter",
+			wantType: (*openaiprovider.Counter)(nil),
+		},
+		{
+			name:     "anthropic messages exact counter",
+			model:    counterModel(llm.ProviderAnthropic, model.APIFormatAnthropic, ""),
+			key:      "sk-ant-counter",
+			wantType: (*anthropicprovider.Counter)(nil),
+		},
+		{
+			name:        "xai responses has no exact counter",
+			model:       counterModel(llm.ProviderXAI, model.APIFormatOpenAIResponses, ""),
+			key:         "xai-counter",
+			wantSupport: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NewCounter(tt.model, tt.key)
+			if tt.wantSupport {
+				if got != nil {
+					t.Fatalf("NewCounter() = %T alongside error, want nil", got)
+				}
+				var supportErr *llm.CounterSupportError
+				if !errors.As(err, &supportErr) || supportErr.Provider != llm.ProviderXAI || supportErr.Reason != llm.CounterSupportExactUnavailable {
+					t.Fatalf("NewCounter() error = %T %v, want xAI unsupported counter", err, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewCounter() error = %v", err)
+			}
+			switch tt.wantType.(type) {
+			case *openaiprovider.Counter:
+				if _, ok := got.(*openaiprovider.Counter); !ok {
+					t.Fatalf("NewCounter() = %T, want *openai.Counter", got)
+				}
+			case *anthropicprovider.Counter:
+				if _, ok := got.(*anthropicprovider.Counter); !ok {
+					t.Fatalf("NewCounter() = %T, want *anthropic.Counter", got)
+				}
+			}
+			if err := got.CounterCapability().Validate(); err != nil {
+				t.Fatalf("CounterCapability().Validate() error = %v", err)
 			}
 		})
 	}

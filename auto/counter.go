@@ -6,7 +6,10 @@ import (
 	contextcount "github.com/looprig/inference/contextcount"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
+	anthropicprovider "github.com/looprig/llm/providers/anthropic"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
+	openaiprovider "github.com/looprig/llm/providers/openai"
+	xaiprovider "github.com/looprig/llm/providers/xai"
 )
 
 // NewCounter validates model and resolves its exact provider context counter from
@@ -16,9 +19,8 @@ import (
 // Error ordering is intentional: model validation runs first so unknown or
 // contradictory models remain validation failures. Exact-counter support is then
 // classified before API-key presence, so a known unsupported provider cannot be
-// mistaken for a supported counter with a missing key. Google is the only exact
-// counter constructible from these inputs; its constructor performs the final
-// fail-closed API-key validation.
+// mistaken for a supported counter with a missing key. Providers with an exact
+// counter perform the final fail-closed API-key validation in their constructors.
 func NewCounter(model model.Model, key auth.APIKey) (contextcount.ContextCounter, error) {
 	if err := llm.ValidateModel(model); err != nil {
 		return nil, err
@@ -40,6 +42,33 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 			}
 		}
 		return geminiprovider.NewCounter(key)
+	case llm.ProviderOpenAI:
+		if apiFormat != model.APIFormatOpenAIResponses {
+			return nil, &llm.CounterSupportError{
+				Provider:  provider,
+				Reason:    llm.CounterSupportAPIFormatUnavailable,
+				APIFormat: apiFormat,
+			}
+		}
+		return openaiprovider.NewCounter(key)
+	case llm.ProviderAnthropic:
+		if apiFormat != model.APIFormatAnthropic {
+			return nil, &llm.CounterSupportError{
+				Provider:  provider,
+				Reason:    llm.CounterSupportAPIFormatUnavailable,
+				APIFormat: apiFormat,
+			}
+		}
+		return anthropicprovider.NewCounter(key)
+	case llm.ProviderXAI:
+		if apiFormat != model.APIFormatOpenAIResponses {
+			return nil, &llm.CounterSupportError{
+				Provider:  provider,
+				Reason:    llm.CounterSupportAPIFormatUnavailable,
+				APIFormat: apiFormat,
+			}
+		}
+		return xaiprovider.NewCounter(key)
 	case llm.ProviderBedrock:
 		if apiFormat == model.APIFormatAnthropic {
 			return nil, &llm.CounterDirectConstructionError{

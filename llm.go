@@ -19,6 +19,9 @@ const (
 	ProviderPhala      Provider = "phala"
 	ProviderChutes     Provider = "chutes"
 	ProviderOpenRouter Provider = "openrouter"
+	ProviderOpenAI     Provider = "openai"
+	ProviderAnthropic  Provider = "anthropic"
+	ProviderXAI        Provider = "xai"
 	ProviderBedrock    Provider = "bedrock"
 	// ProviderGoogle is Google's Gemini generateContent backend. The provider (the
 	// backend "google") and the dialect (APIFormatGemini) are distinct axes: google

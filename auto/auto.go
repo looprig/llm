@@ -22,15 +22,19 @@ import (
 	"github.com/looprig/inference/codec/anthropicapi"
 	"github.com/looprig/inference/codec/geminiapi"
 	"github.com/looprig/inference/codec/openaiapi"
+	"github.com/looprig/inference/codec/openairesponses"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/route"
 
 	"github.com/looprig/inference/transport"
 
 	"github.com/looprig/llm"
+	anthropicprovider "github.com/looprig/llm/providers/anthropic"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
+	openaiprovider "github.com/looprig/llm/providers/openai"
 	"github.com/looprig/llm/providers/openrouter"
+	xaiprovider "github.com/looprig/llm/providers/xai"
 )
 
 // SigV4NotConstructibleError is returned by New for a provider whose required
@@ -141,6 +145,12 @@ func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Clien
 			return openrouter.New(selected, key, config.openRouter...)
 		}
 		return genericHTTP(selected, auth.Key(key))
+	case llm.ProviderOpenAI:
+		return openaiprovider.New(selected, key)
+	case llm.ProviderAnthropic:
+		return anthropicprovider.New(selected, key)
+	case llm.ProviderXAI:
+		return xaiprovider.New(selected, key)
 	case llm.ProviderGoogle:
 		// Google's Gemini generateContent API is not plain codec-over-HTTP (per-model
 		// ":generateContent" path + an x-goog-api-key header), so it uses the bespoke
@@ -231,6 +241,8 @@ func codecFor(f model.APIFormat) (codec.Codec, error) {
 		return anthropicapi.Codec{}, nil
 	case model.APIFormatGemini:
 		return geminiapi.Codec{}, nil
+	case model.APIFormatOpenAIResponses:
+		return openairesponses.Codec{}, nil
 	default:
 		return nil, &model.ValidationError{Field: "APIFormat", Reason: "no codec implemented for this API format yet"}
 	}

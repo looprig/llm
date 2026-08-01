@@ -16,6 +16,7 @@ import (
 	"github.com/looprig/inference/codec/anthropicapi"
 	"github.com/looprig/inference/codec/geminiapi"
 	"github.com/looprig/inference/codec/openaiapi"
+	"github.com/looprig/inference/codec/openairesponses"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/transport"
 
@@ -44,6 +45,18 @@ func lmStudioLocalModel(name string) model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderLMStudio), model.APIFormatOpenAI, "http://localhost:1234/v1", name, model.WithTools())
 }
 
+func openAIResponsesModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderOpenAI), model.APIFormatOpenAIResponses, "https://api.openai.com/v1", name, model.WithTools(), model.WithThinking())
+}
+
+func anthropicMessagesModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderAnthropic), model.APIFormatAnthropic, "https://api.anthropic.com/v1", name, model.WithTools(), model.WithThinking())
+}
+
+func xAIResponsesModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderXAI), model.APIFormatOpenAIResponses, "https://api.x.ai/v1", name, model.WithTools(), model.WithThinking())
+}
+
 // TestNew exercises the dispatch + fail-closed auth contract: valid models build a
 // non-nil client, an unknown/self-contradictory model is rejected before dispatch
 // with a *model.ValidationError, and a key-requiring provider given no key fails
@@ -62,12 +75,18 @@ func TestNew(t *testing.T) {
 	}{
 		{name: "chutes with key", model: chutesKimiK2Model(), key: "k"},
 		{name: "openrouter with key", model: openRouterModel("x"), key: "sk-or-key"},
+		{name: "openai with key", model: openAIResponsesModel("gpt-5"), key: "sk-openai-key"},
+		{name: "anthropic with key", model: anthropicMessagesModel("claude-sonnet-4-6"), key: "sk-ant-key"},
+		{name: "xai with key", model: xAIResponsesModel("grok-4-5"), key: "xai-key"},
 		{name: "google with key", model: geminiFlashModel(), key: "AIza-k"},
 		{name: "lmstudio without key (AuthNone)", model: lmStudioLocalModel("qwen"), key: ""},
 		{name: "lmstudio ignores a supplied key", model: lmStudioLocalModel("qwen"), key: "k"},
 		{name: "phala empty key fails closed", model: model.CustomModel(model.ProviderName(llm.ProviderPhala), model.APIFormatOpenAI, "https://api.phala.network/v1", "zai-org/GLM-4.6", model.WithContextLimits(model.ContextLimits{WindowTokens: 200_000}), model.WithTools(), model.WithThinking()), key: "", wantErr: true, wantAuthReq: true},
 		{name: "chutes empty key fails closed", model: chutesKimiK2Model(), key: "", wantErr: true, wantAuthReq: true},
 		{name: "openrouter empty key fails closed", model: openRouterModel("x"), key: "", wantErr: true, wantAuthReq: true},
+		{name: "openai empty key fails closed", model: openAIResponsesModel("gpt-5"), key: "", wantErr: true, wantAuthReq: true},
+		{name: "anthropic empty key fails closed", model: anthropicMessagesModel("claude-sonnet-4-6"), key: "", wantErr: true, wantAuthReq: true},
+		{name: "xai empty key fails closed", model: xAIResponsesModel("grok-4-5"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "google empty key fails closed", model: geminiFlashModel(), key: "", wantErr: true, wantAuthReq: true},
 		{
 			name:    "unknown provider rejected before dispatch",
@@ -276,6 +295,12 @@ func TestCodecFor(t *testing.T) {
 			format: model.APIFormatAnthropic,
 			is:     func(c codec.Codec) bool { _, ok := c.(anthropicapi.Codec); return ok },
 			want:   "anthropicapi.Codec",
+		},
+		{
+			name:   "openai responses",
+			format: model.APIFormatOpenAIResponses,
+			is:     func(c codec.Codec) bool { _, ok := c.(openairesponses.Codec); return ok },
+			want:   "openairesponses.Codec",
 		},
 		{
 			name:   "gemini",
