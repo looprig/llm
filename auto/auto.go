@@ -30,6 +30,7 @@ import (
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
+	"github.com/looprig/llm/providers/openrouter"
 )
 
 // SigV4NotConstructibleError is returned by New for a provider whose required
@@ -62,6 +63,22 @@ func (e *PolicyNotConstructibleError) Error() string {
 	return fmt.Sprintf("provider %q requires an attestation policy that auto.New cannot supply; construct it directly via %s", e.Provider, e.Use)
 }
 
+// Option customizes construction for a provider-specific branch.
+type Option func(*options)
+
+type options struct {
+	openRouter []openrouter.Option
+}
+
+// WithOpenRouterOptions applies OpenRouter-specific headers and request-body
+// options. It is used only when selected.Provider is OpenRouter; supplying it
+// for another provider is rejected by New.
+func WithOpenRouterOptions(opts ...openrouter.Option) Option {
+	return func(config *options) {
+		config.openRouter = append(config.openRouter, opts...)
+	}
+}
+
 // New validates model, enforces the provider's fail-closed auth requirement, then
 // constructs the concrete provider client. Ordered:
 //  1. llm.ValidateModel — a self-contradictory or unknown-provider model yields a
@@ -74,7 +91,7 @@ func (e *PolicyNotConstructibleError) Error() string {
 //
 // No live I/O happens here; the returned inference.Client performs its own
 // per-request guards (binding, validation, auth) when Invoke/Stream is called.
-func New(selected model.Model, key auth.APIKey) (inference.Client, error) {
+func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Client, error) {
 	if err := llm.ValidateModel(selected); err != nil {
 		return nil, err
 	}
@@ -85,6 +102,18 @@ func New(selected model.Model, key auth.APIKey) (inference.Client, error) {
 	}
 	if kind == auth.AuthAPIKey && key == "" {
 		return nil, &llm.AuthRequiredError{Provider: p, Kind: kind}
+	}
+	var config options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&config)
+		}
+	}
+	if len(config.openRouter) > 0 && p != llm.ProviderOpenRouter {
+		return nil, &model.ValidationError{
+			Field:  "Provider",
+			Reason: "OpenRouter options require provider \"openrouter\"",
+		}
 	}
 	switch p {
 	case llm.ProviderPhala:
@@ -108,6 +137,9 @@ func New(selected model.Model, key auth.APIKey) (inference.Client, error) {
 		// OpenRouter is an OpenAI-compatible aggregation gateway behind a Bearer key. The
 		// fail-closed empty-key guard above (RequiredAuth → AuthAPIKey) already rejected a
 		// missing key, so key is present here; wrap it as Bearer auth.
+		if len(config.openRouter) > 0 {
+			return openrouter.New(selected, key, config.openRouter...)
+		}
 		return genericHTTP(selected, auth.Key(key))
 	case llm.ProviderGoogle:
 		// Google's Gemini generateContent API is not plain codec-over-HTTP (per-model

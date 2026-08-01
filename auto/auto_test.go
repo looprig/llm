@@ -1,7 +1,12 @@
 package auto
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/looprig/inference"
@@ -17,6 +22,7 @@ import (
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
+	"github.com/looprig/llm/providers/openrouter"
 )
 
 // The helpers below stand in for the deleted model catalogue: each returns a valid
@@ -319,6 +325,42 @@ func TestNewLMStudioDefaultEndpoint(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("New(lmStudioLocalModel, \"\") = nil, want non-nil client")
+	}
+}
+
+func TestNewWithOpenRouterOptions(t *testing.T) {
+	t.Parallel()
+
+	bodyCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyCh <- body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"response-id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
+	client, err := New(selected, "sk-or-test", WithOpenRouterOptions(openrouter.WithUsage(false)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+		t.Fatalf("request body JSON error = %v", err)
+	}
+	var usage struct {
+		Include bool `json:"include"`
+	}
+	if err := json.Unmarshal(body["usage"], &usage); err != nil {
+		t.Fatalf("usage JSON error = %v", err)
+	}
+	if usage.Include {
+		t.Error("usage.include = true, want explicit false")
 	}
 }
 
