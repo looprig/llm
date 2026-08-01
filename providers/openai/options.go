@@ -1,0 +1,83 @@
+package openai
+
+// ReasoningOptions controls the OpenAI Responses reasoning object. The fields
+// are strings because the Responses API owns the accepted vocabulary and may
+// add values without changing this package's neutral request model.
+type ReasoningOptions struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// ServiceTier selects the OpenAI Responses processing tier.
+type ServiceTier string
+
+const (
+	ServiceTierAuto    ServiceTier = "auto"
+	ServiceTierDefault ServiceTier = "default"
+	ServiceTierFlex    ServiceTier = "flex"
+	ServiceTierScale   ServiceTier = "scale"
+)
+
+type config struct {
+	reasoning      *ReasoningOptions
+	serviceTier    ServiceTier
+	metadata       map[string]string
+	promptCacheKey string
+}
+
+// Option customizes an OpenAI Responses client at construction time.
+type Option func(*config)
+
+// WithReasoning sets the Responses reasoning controls. It replaces any
+// reasoning controls inferred from model sampling so the caller has one
+// explicit provider-specific policy.
+func WithReasoning(options ReasoningOptions) Option {
+	return func(c *config) {
+		copy := options
+		c.reasoning = &copy
+	}
+}
+
+// WithServiceTier selects the Responses service tier.
+func WithServiceTier(tier ServiceTier) Option {
+	return func(c *config) { c.serviceTier = tier }
+}
+
+// WithMetadata attaches OpenAI request metadata. The map is copied when the
+// option is applied so later caller mutation cannot change a live client.
+func WithMetadata(metadata map[string]string) Option {
+	return func(c *config) {
+		if metadata == nil {
+			c.metadata = nil
+			return
+		}
+		c.metadata = make(map[string]string, len(metadata))
+		for key, value := range metadata {
+			c.metadata[key] = value
+		}
+	}
+}
+
+// WithPromptCacheKey sets the stable OpenAI prompt-cache key for requests.
+func WithPromptCacheKey(key string) Option {
+	return func(c *config) { c.promptCacheKey = key }
+}
+
+func (c config) hasBodyOptions() bool {
+	return c.reasoning != nil || c.serviceTier != "" || c.metadata != nil || c.promptCacheKey != ""
+}
+
+func (c config) clone() config {
+	clone := c
+	if c.reasoning != nil {
+		reasoning := *c.reasoning
+		clone.reasoning = &reasoning
+	}
+	if c.metadata != nil {
+		clone.metadata = make(map[string]string, len(c.metadata))
+		for key, value := range c.metadata {
+			clone.metadata[key] = value
+		}
+	}
+	return clone
+}
