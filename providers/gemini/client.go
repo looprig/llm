@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -194,7 +195,9 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 	// too as a harmless backstop so the connection is never leaked.
 	reader, err := c.codec.DecodeStream(httpResp)
 	if err != nil {
-		httpResp.Body.Close()
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
 		return nil, err
 	}
 	return reader, nil

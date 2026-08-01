@@ -451,9 +451,7 @@ func canonicalEndpointHost(host string) (string, *CounterEndpointError) {
 		return "", counterEndpointError(CounterEndpointInvalidHost)
 	}
 	host = strings.ToLower(host)
-	if strings.HasSuffix(host, ".") {
-		host = strings.TrimSuffix(host, ".")
-	}
+	host = strings.TrimSuffix(host, ".")
 	if !validDNSHost(host) {
 		return "", counterEndpointError(CounterEndpointInvalidHost)
 	}

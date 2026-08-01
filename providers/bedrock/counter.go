@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	counterTokenizerRevision      contextcount.TokenizerRevision = "aws-bedrock-count-tokens-2023-09-30-invoke-model-v1"
+	counterTokenizerRevision      contextcount.TokenizerRevision = "aws-bedrock-count-tokens-2023-09-30-invoke-model-v1" // #nosec G101 -- public tokenizer revision identifier, not a credential
 	bedrockSecurityPolicyRevision                                = "aws-bedrock-runtime-sigv4-tls-v1"
 	maxCountResponseBodyBytes                                    = 64 << 10
 	maxBedrockModelIDBytes                                       = 256
