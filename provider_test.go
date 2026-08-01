@@ -82,3 +82,14 @@ func TestProviderRequiredAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIResponsesAPIFormatIsDistinctFromChatCompletions(t *testing.T) {
+	t.Parallel()
+
+	if model.APIFormatOpenAIResponses == model.APIFormatOpenAI {
+		t.Fatalf("Responses API format = %q, want a distinct format from Chat Completions", model.APIFormatOpenAIResponses)
+	}
+	if got, want := string(model.APIFormatOpenAIResponses), "openai-responses"; got != want {
+		t.Fatalf("Responses API format = %q, want %q", got, want)
+	}
+}
