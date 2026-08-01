@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
@@ -32,6 +33,8 @@ type ReasoningOptions struct {
 	MaxTokens *int   `json:"max_tokens,omitempty"`
 	Exclude   *bool  `json:"exclude,omitempty"`
 	Enabled   *bool  `json:"enabled,omitempty"`
+	Context   string `json:"context,omitempty"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // ProviderRoutingOptions controls OpenRouter's provider-selection policy.
@@ -204,6 +207,10 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 		if err != nil {
 			return codec.EncodedRequest{}, fmt.Errorf("openrouter: encode reasoning option: %w", err)
 		}
+		// The OpenRouter reasoning object is the explicit provider-specific
+		// configuration. Do not send the legacy OpenAI reasoning_effort field
+		// alongside it, since the two controls can disagree.
+		delete(body, "reasoning_effort")
 	}
 	if c.config.promptCacheKey != "" {
 		body["prompt_cache_key"], err = json.Marshal(c.config.promptCacheKey)
@@ -229,11 +236,224 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 }
 
 func (requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {
+	if normalized, err := normalizeOpenRouterReasoning(body); err == nil {
+		body = normalized
+	}
 	return (openaiapi.Codec{}).DecodeResponse(body)
 }
 
 func (requestCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
+	resp.Body = &reasoningResponseBody{source: resp.Body}
 	return (openaiapi.Codec{}).DecodeStream(resp)
+}
+
+// normalizeOpenRouterReasoning translates OpenRouter's reasoning response
+// aliases into the reasoning_content field understood by the shared OpenAI
+// decoder. The neutral content model carries reasoning as text, so structured
+// reasoning details contribute their text/summary fields when available.
+func normalizeOpenRouterReasoning(body []byte) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	rawChoices, ok := envelope["choices"]
+	if !ok {
+		return body, nil
+	}
+	var choices []map[string]json.RawMessage
+	if err := json.Unmarshal(rawChoices, &choices); err != nil {
+		return body, nil
+	}
+
+	changed := false
+	for _, choice := range choices {
+		field := "message"
+		rawMessage, ok := choice[field]
+		if !ok {
+			field = "delta"
+			rawMessage, ok = choice[field]
+		}
+		if !ok {
+			continue
+		}
+		var message map[string]json.RawMessage
+		if err := json.Unmarshal(rawMessage, &message); err != nil {
+			continue
+		}
+
+		if rawReasoningContent, exists := message["reasoning_content"]; exists {
+			var reasoningContent string
+			if err := json.Unmarshal(rawReasoningContent, &reasoningContent); err == nil && reasoningContent != "" {
+				continue
+			}
+		}
+
+		reasoning := ""
+		if rawReasoning, exists := message["reasoning"]; exists {
+			_ = json.Unmarshal(rawReasoning, &reasoning)
+		}
+		if reasoning == "" {
+			reasoning = reasoningDetailsText(message["reasoning_details"])
+		}
+		if reasoning == "" {
+			continue
+		}
+
+		normalizedReasoning, err := json.Marshal(reasoning)
+		if err != nil {
+			return nil, err
+		}
+		message["reasoning_content"] = normalizedReasoning
+		updatedMessage, err := json.Marshal(message)
+		if err != nil {
+			return nil, err
+		}
+		choice[field] = updatedMessage
+		changed = true
+	}
+	if !changed {
+		return body, nil
+	}
+
+	updatedChoices, err := json.Marshal(choices)
+	if err != nil {
+		return nil, err
+	}
+	envelope["choices"] = updatedChoices
+	return json.Marshal(envelope)
+}
+
+func reasoningDetailsText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var details []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return ""
+	}
+	var parts []string
+	for _, detail := range details {
+		for _, field := range []string{"text", "summary"} {
+			var value string
+			if err := json.Unmarshal(detail[field], &value); err == nil && value != "" {
+				parts = append(parts, value)
+				break
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// reasoningResponseBody rewrites complete SSE data lines while preserving the
+// underlying response body's ownership and streaming behavior.
+type reasoningResponseBody struct {
+	source  io.ReadCloser
+	pending []byte
+	output  bytes.Buffer
+	done    bool
+	err     error
+}
+
+func (b *reasoningResponseBody) Read(p []byte) (int, error) {
+	for b.output.Len() == 0 {
+		if b.err != nil {
+			return 0, b.err
+		}
+		if b.done {
+			return 0, io.EOF
+		}
+
+		buf := make([]byte, 32*1024)
+		n, err := b.source.Read(buf)
+		if n > 0 {
+			b.pending = append(b.pending, buf[:n]...)
+			b.processLines(false)
+		}
+		if err != nil {
+			if err == io.EOF {
+				b.done = true
+				b.processLines(true)
+				if b.output.Len() == 0 {
+					return 0, io.EOF
+				}
+				b.err = io.EOF
+			} else {
+				b.err = err
+			}
+		}
+	}
+	return b.output.Read(p)
+}
+
+func (b *reasoningResponseBody) Close() error {
+	return b.source.Close()
+}
+
+func (b *reasoningResponseBody) processLines(atEOF bool) {
+	for {
+		line, rest, ok := splitSSELine(b.pending, atEOF)
+		if !ok {
+			return
+		}
+		b.output.Write(transformSSELine(line))
+		b.pending = rest
+	}
+}
+
+func splitSSELine(data []byte, atEOF bool) (line, rest []byte, ok bool) {
+	for i, value := range data {
+		switch value {
+		case '\n':
+			return data[:i+1], data[i+1:], true
+		case '\r':
+			if i+1 == len(data) && !atEOF {
+				return nil, data, false
+			}
+			end := i + 1
+			if i+1 < len(data) && data[i+1] == '\n' {
+				end++
+			}
+			return data[:end], data[end:], true
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return data, nil, true
+	}
+	return nil, data, false
+}
+
+func transformSSELine(line []byte) []byte {
+	coreEnd := len(line)
+	if coreEnd > 0 && line[coreEnd-1] == '\n' {
+		coreEnd--
+		if coreEnd > 0 && line[coreEnd-1] == '\r' {
+			coreEnd--
+		}
+	} else if coreEnd > 0 && line[coreEnd-1] == '\r' {
+		coreEnd--
+	}
+	core := line[:coreEnd]
+	if !bytes.HasPrefix(core, []byte("data:")) {
+		return line
+	}
+	value := core[len("data:"):]
+	space := len(value) > 0 && value[0] == ' '
+	if space {
+		value = value[1:]
+	}
+	normalized, err := normalizeOpenRouterReasoning(value)
+	if err != nil || bytes.Equal(normalized, value) {
+		return line
+	}
+
+	result := make([]byte, 0, len(line)+len(normalized)-len(value))
+	result = append(result, core[:len("data:")]...)
+	if space {
+		result = append(result, ' ')
+	}
+	result = append(result, normalized...)
+	result = append(result, line[coreEnd:]...)
+	return result
 }
 
 func (c config) hasBodyOptions() bool {

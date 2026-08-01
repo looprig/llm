@@ -33,7 +33,7 @@ func TestNewInvokeAddsOpenRouterOptions(t *testing.T) {
 		requestCh <- r
 		bodyCh <- body
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"response-id","model":"anthropic/claude-sonnet-4","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+		fmt.Fprint(w, `{"id":"response-id","model":"anthropic/claude-sonnet-4","choices":[{"message":{"role":"assistant","content":"ok","reasoning_details":[{"type":"reasoning.summary","summary":"thinking"}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
 	}))
 	defer srv.Close()
 
@@ -42,6 +42,7 @@ func TestNewInvokeAddsOpenRouterOptions(t *testing.T) {
 		model.APIFormatOpenAI,
 		srv.URL+"/api/v1/",
 		"anthropic/claude-sonnet-4",
+		model.WithSampling(model.Sampling{Effort: model.EffortLow}),
 	)
 	client, err := openrouter.New(
 		selected,
@@ -83,6 +84,12 @@ func TestNewInvokeAddsOpenRouterOptions(t *testing.T) {
 	if resp == nil || resp.Message == nil {
 		t.Fatalf("Invoke() response = %+v, want a decoded message", resp)
 	}
+	if len(resp.Message.Blocks) != 2 {
+		t.Fatalf("decoded blocks = %#v, want reasoning and text blocks", resp.Message.Blocks)
+	}
+	if thinking, ok := resp.Message.Blocks[0].(*content.ThinkingBlock); !ok || thinking.Thinking != "thinking" {
+		t.Errorf("decoded first block = %#v, want ThinkingBlock{thinking}", resp.Message.Blocks[0])
+	}
 
 	req := <-requestCh
 	if req.Method != http.MethodPost {
@@ -112,6 +119,9 @@ func TestNewInvokeAddsOpenRouterOptions(t *testing.T) {
 	decodeField(t, body, "usage", &usage)
 	if !usage.Include {
 		t.Error("usage.include = false, want true")
+	}
+	if _, ok := body["reasoning_effort"]; ok {
+		t.Error("request body contains reasoning_effort alongside an explicit reasoning object")
 	}
 
 	var reasoning openrouter.ReasoningOptions
@@ -174,6 +184,50 @@ func TestNewInvokeOmitsUnsetOptions(t *testing.T) {
 		if _, ok := body[field]; ok {
 			t.Errorf("request body contains unset OpenRouter field %q", field)
 		}
+	}
+}
+
+func TestStreamDecodesOpenRouterReasoning(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"model\":\"model\",\"choices\":[{\"delta\":{\"reasoning\":\"thinking\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
+	client, err := openrouter.New(selected, "sk-or-test")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var chunks []content.Chunk
+	for {
+		chunk, nextErr := reader.Next()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			t.Fatalf("Stream.Next() error = %v", nextErr)
+		}
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("stream chunks = %#v, want reasoning and text", chunks)
+	}
+	if thinking, ok := chunks[0].(*content.ThinkingChunk); !ok || thinking.Thinking != "thinking" {
+		t.Errorf("first stream chunk = %#v, want ThinkingChunk{thinking}", chunks[0])
+	}
+	if text, ok := chunks[1].(*content.TextChunk); !ok || text.Text != "ok" {
+		t.Errorf("second stream chunk = %#v, want TextChunk{ok}", chunks[1])
 	}
 }
 
