@@ -7,19 +7,15 @@ import (
 )
 
 // UnsupportedAPIFormatError is a fail-closed rejection, before any I/O, of a
-// request whose Model.APIFormat this client cannot honor. Provider.supportsAPIFormat
-// admits both APIFormatAnthropic and APIFormatBedrockConverse for Bedrock (so a
-// Converse Model passes the model-validation preset), but this client implements
-// only the Anthropic-native dialect for now; a Converse codec is a documented
-// follow-up. Returning this — rather than silently Anthropic-encoding a Converse
-// request — keeps the client from "silently doing less" than its declared contract.
-// Carries the offending format so callers can branch via errors.As.
+// request whose Model.APIFormat this client cannot honor. Bedrock currently
+// supports the Anthropic-on-Bedrock InvokeModel dialect and native Converse;
+// this error protects future/unknown formats from accidental fallback.
 type UnsupportedAPIFormatError struct {
 	APIFormat model.APIFormat
 }
 
 func (e *UnsupportedAPIFormatError) Error() string {
-	return fmt.Sprintf("bedrock: API format %q is not implemented; this client encodes only the Anthropic dialect (%q)", e.APIFormat, model.APIFormatAnthropic)
+	return fmt.Sprintf("bedrock: API format %q is not implemented", e.APIFormat)
 }
 
 // RequestBuildError is a failure to CONSTRUCT the outbound HTTP request (a
@@ -60,10 +56,8 @@ func (e *BodyTransformError) Error() string {
 
 func (e *BodyTransformError) Unwrap() error { return e.Err }
 
-// StreamingNotSupportedError is returned by Client.Stream: Bedrock streaming uses
-// the AWS eventstream (application/vnd.amazon.eventstream) framing, which is a
-// documented follow-up and is not yet implemented. Fail-closed: no stream is
-// opened. A typed error so a caller can branch (errors.As) and fall back to Invoke.
+// StreamingNotSupportedError is returned only for Anthropic-on-Bedrock
+// InvokeModel requests. Native ConverseStream uses the event-stream codec.
 type StreamingNotSupportedError struct{}
 
 func (*StreamingNotSupportedError) Error() string {

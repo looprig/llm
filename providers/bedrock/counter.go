@@ -18,6 +18,7 @@ import (
 	"github.com/looprig/inference"
 	inferauth "github.com/looprig/inference/auth"
 	"github.com/looprig/inference/codec/anthropicapi"
+	"github.com/looprig/inference/codec/bedrockconverse"
 	contextcount "github.com/looprig/inference/contextcount"
 	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
@@ -154,18 +155,26 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 			Reason: "Bedrock model id must be 1-256 ASCII letters, digits, underscore, dot, hyphen, slash, or colon",
 		}
 	}
-	if req.Model.APIFormat != model.APIFormatAnthropic {
+	switch req.Model.APIFormat {
+	case model.APIFormatAnthropic:
+		encoded, err := anthropicapi.EncodeRequest(req, false)
+		if err != nil {
+			return nil, err
+		}
+		invokeBody, err := toBedrockBody(encoded)
+		if err != nil {
+			return nil, err
+		}
+		return buildCountRequestEnvelope(invokeBody)
+	case model.APIFormatBedrockConverse:
+		converseBody, err := bedrockconverse.EncodeCountTokensInput(req)
+		if err != nil {
+			return nil, err
+		}
+		return buildConverseCountRequestEnvelope(converseBody)
+	default:
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
-	encoded, err := anthropicapi.EncodeRequest(req, false)
-	if err != nil {
-		return nil, err
-	}
-	invokeBody, err := toBedrockBody(encoded)
-	if err != nil {
-		return nil, err
-	}
-	return buildCountRequestEnvelope(invokeBody)
 }
 
 func buildCountRequestEnvelope(invokeBody []byte) ([]byte, error) {
@@ -174,8 +183,21 @@ func buildCountRequestEnvelope(invokeBody []byte) ([]byte, error) {
 	}
 	body, err := json.Marshal(countTokensRequest{
 		Input: countTokensInput{
-			InvokeModel: invokeModelTokensRequest{Body: invokeBody},
+			InvokeModel: &invokeModelTokensRequest{Body: invokeBody},
 		},
+	})
+	if err != nil {
+		return nil, &CounterRequestError{Reason: CounterRequestEnvelopeEncoding, Err: err}
+	}
+	return body, nil
+}
+
+func buildConverseCountRequestEnvelope(converseBody []byte) ([]byte, error) {
+	if len(converseBody) > maxInvokeModelTokensBodyBytes {
+		return nil, &CounterRequestError{Reason: CounterRequestBodyTooLarge}
+	}
+	body, err := json.Marshal(countTokensRequest{
+		Input: countTokensInput{Converse: json.RawMessage(converseBody)},
 	})
 	if err != nil {
 		return nil, &CounterRequestError{Reason: CounterRequestEnvelopeEncoding, Err: err}
@@ -218,7 +240,8 @@ type countTokensRequest struct {
 }
 
 type countTokensInput struct {
-	InvokeModel invokeModelTokensRequest `json:"invokeModel"`
+	InvokeModel *invokeModelTokensRequest `json:"invokeModel,omitempty"`
+	Converse    json.RawMessage           `json:"converse,omitempty"`
 }
 
 type invokeModelTokensRequest struct {

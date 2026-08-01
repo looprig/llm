@@ -61,11 +61,10 @@ func TestNewCounterProviderMatrix(t *testing.T) {
 			wantDirect: true,
 		},
 		{
-			name:          "bedrock converse has no exact counter for dialect",
-			provider:      llm.ProviderBedrock,
-			model:         counterModel(llm.ProviderBedrock, llm.APIFormatBedrockConverse, ""),
-			wantSupport:   true,
-			supportReason: llm.CounterSupportAPIFormatUnavailable,
+			name:       "bedrock converse requires direct construction",
+			provider:   llm.ProviderBedrock,
+			model:      counterModel(llm.ProviderBedrock, llm.APIFormatBedrockConverse, ""),
+			wantDirect: true,
 		},
 		{
 			name:          "lmstudio openai has no provider exact counter",
@@ -290,11 +289,10 @@ func TestResolveCounterDialects(t *testing.T) {
 			wantDirect: true,
 		},
 		{
-			name:          "bedrock converse is unsupported",
-			provider:      llm.ProviderBedrock,
-			apiFormat:     llm.APIFormatBedrockConverse,
-			wantSupport:   true,
-			supportReason: llm.CounterSupportAPIFormatUnavailable,
+			name:       "bedrock converse directs construction",
+			provider:   llm.ProviderBedrock,
+			apiFormat:  llm.APIFormatBedrockConverse,
+			wantDirect: true,
 		},
 		{
 			name:           "unknown provider fails closed",

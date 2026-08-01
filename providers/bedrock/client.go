@@ -1,10 +1,7 @@
-// Package bedrock is an AWS Bedrock Runtime client for Anthropic-on-Bedrock. It
-// satisfies inference.Client for the non-streaming InvokeModel path: it encodes the
-// Anthropic Messages body (via the anthropicapi codec), rewrites it into the
-// Bedrock body (drop "model", add "anthropic_version"), routes to the
-// region-derived bedrock-runtime endpoint with the model id in the URL path, and
-// signs the request with AWS Signature Version 4. Streaming (AWS eventstream) is a
-// documented follow-up and returns a typed StreamingNotSupportedError.
+// Package bedrock is an AWS Bedrock Runtime client for Anthropic-on-Bedrock
+// InvokeModel and native Converse/ConverseStream. It routes the selected native
+// dialect to the corresponding model path and signs every request with AWS
+// Signature Version 4.
 //
 // Credentials are AWS SigV4, not a bearer key, so a Bedrock client is constructed
 // directly via New (auto.New cannot supply SigV4 credentials and errors to here).
@@ -25,6 +22,7 @@ import (
 	"github.com/looprig/inference"
 	inferauth "github.com/looprig/inference/auth"
 	"github.com/looprig/inference/codec/anthropicapi"
+	"github.com/looprig/inference/codec/bedrockconverse"
 	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
 	stream "github.com/looprig/inference/stream"
@@ -43,9 +41,11 @@ const (
 	endpointScheme = "https"
 	hostFormat     = "bedrock-runtime.%s.amazonaws.com"
 	// path fragments: /model/<model-id>/invoke.
-	pathModelPrefix  = "/model/"
-	pathInvokeSuffix = "/invoke"
-	pathCountSuffix  = "/count-tokens"
+	pathModelPrefix          = "/model/"
+	pathInvokeSuffix         = "/invoke"
+	pathConverseSuffix       = "/converse"
+	pathConverseStreamSuffix = "/converse-stream"
+	pathCountSuffix          = "/count-tokens"
 
 	contentTypeJSON = "application/json"
 	maxRegionBytes  = 64
@@ -74,6 +74,7 @@ type Client struct {
 	endpoint string // scheme://host base, e.g. https://bedrock-runtime.us-east-1.amazonaws.com
 	signer   inferauth.Authenticator
 	codec    anthropicapi.Codec
+	options  config
 	hc       *http.Client
 }
 
@@ -81,11 +82,11 @@ type Client struct {
 // closed with *ConfigError when the region or either mandatory credential field
 // (AccessKeyID, SecretAccessKey) is empty — no Client and no network object are
 // created. The session token is optional (used for temporary credentials).
-func New(creds auth.SigV4Credentials, region string) (inference.Client, error) {
+func New(creds auth.SigV4Credentials, region string, options ...Option) (inference.Client, error) {
 	if err := validateConfig(creds, region); err != nil {
 		return nil, err
 	}
-	return newClient(creds, region, defaultEndpoint(region)), nil
+	return newClient(creds, region, defaultEndpoint(region), options...), nil
 }
 
 func validateConfig(creds auth.SigV4Credentials, region string) error {
@@ -121,11 +122,19 @@ func validRegion(region string) bool {
 // scheme://host base; New derives it from the region, tests override it to reach
 // an httptest.Server. It builds the SigV4 signer once and the phase-bounded,
 // TLS>=1.2 http.Client.
-func newClient(creds auth.SigV4Credentials, region, endpoint string) *Client {
+
+func newClient(creds auth.SigV4Credentials, region, endpoint string, options ...Option) *Client {
+	cfg := config{}
+	for _, option := range options {
+		if option != nil {
+			option(&cfg)
+		}
+	}
 	return &Client{
 		region:   region,
 		endpoint: endpoint,
 		signer:   auth.SigV4(creds, region, bedrockService),
+		options:  cfg.clone(),
 		hc:       newHTTPClient(),
 	}
 }
@@ -153,12 +162,10 @@ func defaultEndpoint(region string) string {
 	return endpointScheme + "://" + fmt.Sprintf(hostFormat, region)
 }
 
-// Invoke sends a non-streaming InvokeModel request and returns the decoded
-// Anthropic response. Ordered, all pre-I/O guards first: (1) provider binding,
-// (2) ValidateModel (provider truth table + structural), (3) API-format guard
-// (Anthropic-only), (4) encode Anthropic body + rewrite to the Bedrock body,
-// (5) build the ctx-bound POST to the per-model path, (6) SigV4-sign, (7) do +
-// map transport/non-2xx failures, (8) decode the Anthropic response.
+// Invoke sends a non-streaming request in the selected Bedrock dialect. Ordered,
+// all pre-I/O guards first: provider binding, model validation, API-format
+// selection, local encoding, request construction, SigV4 signing, HTTP error
+// mapping, and response decoding.
 func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.Response, error) {
 	if err := c.checkBinding(req.Model); err != nil {
 		return nil, err
@@ -166,13 +173,17 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	if err := llm.ValidateModel(req.Model); err != nil {
 		return nil, err
 	}
-	// supportsAPIFormat(bedrock) admits both Anthropic and Bedrock Converse, so a
-	// Converse Model passes ValidateModel; this client only implements the Anthropic
-	// dialect, so fail closed rather than silently Anthropic-encode a Converse call.
-	if req.Model.APIFormat != model.APIFormatAnthropic {
+	switch req.Model.APIFormat {
+	case model.APIFormatAnthropic:
+		return c.invokeAnthropic(ctx, req)
+	case model.APIFormatBedrockConverse:
+		return c.invokeConverse(ctx, req)
+	default:
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
+}
 
+func (c *Client) invokeAnthropic(ctx context.Context, req inference.Request) (*inference.Response, error) {
 	anthropicBody, err := anthropicapi.EncodeRequest(req, false)
 	if err != nil {
 		return nil, err
@@ -181,23 +192,17 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	if err != nil {
 		return nil, err
 	}
-
 	httpReq, err := c.buildRequest(ctx, req.Model.Name, body)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.signer.Authorize(ctx, httpReq); err != nil {
+	httpResp, err := c.doSigned(ctx, httpReq)
+	if err != nil {
 		return nil, err
 	}
-
-	httpResp, err := c.hc.Do(httpReq)
+	respBody, err := readResponseBody(httpResp)
 	if err != nil {
-		return nil, &failure.NetworkError{Err: err}
-	}
-	defer httpResp.Body.Close()
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, &failure.NetworkError{Err: err}
+		return nil, err
 	}
 	if httpResp.StatusCode/100 != 2 {
 		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
@@ -205,11 +210,121 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	return c.codec.DecodeResponse(respBody)
 }
 
-// Stream is not implemented: Bedrock streaming uses AWS eventstream framing, a
-// documented follow-up. It fails closed with *StreamingNotSupportedError and opens
-// no connection.
-func (c *Client) Stream(_ context.Context, _ inference.Request) (*stream.StreamReader[content.Chunk], error) {
-	return nil, &StreamingNotSupportedError{}
+func (c *Client) invokeConverse(ctx context.Context, req inference.Request) (*inference.Response, error) {
+	body, err := c.encodeConverse(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := buildRuntimeRequestWithAccept(ctx, c.endpoint, req.Model.Name, pathConverseSuffix, body, contentTypeJSON)
+	if err != nil {
+		return nil, err
+	}
+	httpResp, err := c.doSigned(ctx, httpReq)
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := readResponseBody(httpResp)
+	if err != nil {
+		return nil, err
+	}
+	if httpResp.StatusCode/100 != 2 {
+		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+	}
+	response, err := (bedrockconverse.Codec{}).DecodeResponse(respBody)
+	if err != nil {
+		return nil, err
+	}
+	if response.Model == "" {
+		response.Model = req.Model.Name
+	}
+	return response, nil
+}
+
+// Stream sends a native ConverseStream request. Anthropic InvokeModel streaming
+// remains intentionally unsupported because it uses a different Bedrock wire
+// contract and must not be silently switched to Converse.
+func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
+	if err := c.checkBinding(req.Model); err != nil {
+		return nil, err
+	}
+	if err := llm.ValidateModel(req.Model); err != nil {
+		return nil, err
+	}
+	if req.Model.APIFormat == model.APIFormatAnthropic {
+		return nil, &StreamingNotSupportedError{}
+	}
+	if req.Model.APIFormat != model.APIFormatBedrockConverse {
+		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
+	}
+	body, err := c.encodeConverse(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := buildRuntimeRequestWithAccept(ctx, c.endpoint, req.Model.Name, pathConverseStreamSuffix, body, "application/vnd.amazon.eventstream")
+	if err != nil {
+		return nil, err
+	}
+	httpResp, err := c.doSigned(ctx, httpReq)
+	if err != nil {
+		return nil, err
+	}
+	if httpResp.StatusCode/100 != 2 {
+		respBody, readErr := readResponseBody(httpResp)
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+	}
+	reader, err := (bedrockconverse.Codec{}).DecodeStream(httpResp)
+	if err != nil {
+		_ = httpResp.Body.Close()
+		return nil, err
+	}
+	return withModel(reader, req.Model.Name), nil
+}
+
+func (c *Client) encodeConverse(req inference.Request) ([]byte, error) {
+	body, err := bedrockconverse.EncodeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.options.applyConverse(body)
+}
+
+func (c *Client) doSigned(ctx context.Context, request *http.Request) (*http.Response, error) {
+	if err := c.signer.Authorize(ctx, request); err != nil {
+		return nil, err
+	}
+	response, err := c.hc.Do(request)
+	if err != nil {
+		return nil, &failure.NetworkError{Err: err}
+	}
+	if response == nil || response.Body == nil {
+		return nil, &failure.NetworkError{Err: fmt.Errorf("bedrock: empty HTTP response")}
+	}
+	return response, nil
+}
+
+func readResponseBody(response *http.Response) ([]byte, error) {
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, &failure.NetworkError{Err: err}
+	}
+	return body, nil
+}
+
+func withModel(reader *stream.StreamReader[content.Chunk], modelID string) *stream.StreamReader[content.Chunk] {
+	return stream.NewStreamReaderWithResult(reader.Next, reader.Close, func() (stream.StreamResult, bool, error) {
+		result, ok := reader.Result()
+		if !ok {
+			return stream.StreamResult{}, false, nil
+		}
+		if result.Model == "" {
+			result.Model = modelID
+		}
+		return result, true, nil
+	})
 }
 
 // checkBinding fails closed when the request's Model names a provider other than
@@ -239,12 +354,16 @@ func (c *Client) buildRequest(ctx context.Context, modelID string, body []byte) 
 }
 
 func buildRuntimeRequest(ctx context.Context, endpoint, modelID, suffix string, body []byte) (*http.Request, error) {
+	return buildRuntimeRequestWithAccept(ctx, endpoint, modelID, suffix, body, contentTypeJSON)
+}
+
+func buildRuntimeRequestWithAccept(ctx context.Context, endpoint, modelID, suffix string, body []byte, accept string) (*http.Request, error) {
 	rawURL := endpoint + pathModelPrefix + url.PathEscape(modelID) + suffix
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, &RequestBuildError{Err: err}
 	}
 	httpReq.Header.Set("Content-Type", contentTypeJSON)
-	httpReq.Header.Set("Accept", contentTypeJSON)
+	httpReq.Header.Set("Accept", accept)
 	return httpReq, nil
 }

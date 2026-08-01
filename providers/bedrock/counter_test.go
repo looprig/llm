@@ -90,6 +90,69 @@ func TestCounterEnvelopeMatchesInvokeBody(t *testing.T) {
 	}
 }
 
+func TestCounterConverseEnvelopeUsesNativeUnion(t *testing.T) {
+	t.Parallel()
+
+	m := model.CustomModel(
+		model.ProviderName(llm.ProviderBedrock),
+		model.APIFormatBedrockConverse,
+		"",
+		counterModelID,
+		model.WithTools(),
+		model.WithStructuredOutputWithTools(),
+	)
+	req := inference.Request{
+		Model:  m,
+		System: "count this",
+		Messages: content.AgenticMessages{&content.UserMessage{Message: content.Message{
+			Role: content.RoleUser, Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
+		}}},
+		Tools:  []inference.Tool{{Name: "lookup", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)}},
+		Output: &inference.OutputSchema{Name: "answer", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+	}
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `{"inputTokens":29}`)
+	}))
+	defer srv.Close()
+
+	counter := newCounter(counterTestCreds(), "us-east-1", srv.URL)
+	got, err := counter.CountContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CountContext() error = %v", err)
+	}
+	if got.InputTokens != 29 || got.Quality != contextcount.CountQualityExactProvider {
+		t.Errorf("CountContext() = %+v, want exact 29", got)
+	}
+	var envelope struct {
+		Input struct {
+			Converse    json.RawMessage `json:"converse"`
+			InvokeModel json.RawMessage `json:"invokeModel"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(captured, &envelope); err != nil {
+		t.Fatalf("count envelope JSON = %v", err)
+	}
+	if len(envelope.Input.Converse) == 0 || string(envelope.Input.InvokeModel) != "" {
+		t.Fatalf("input union = converse:%s invokeModel:%s, want Converse only", envelope.Input.Converse, envelope.Input.InvokeModel)
+	}
+	var converse map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Input.Converse, &converse); err != nil {
+		t.Fatalf("input.converse JSON = %v", err)
+	}
+	for _, field := range []string{"messages", "system", "toolConfig"} {
+		if _, ok := converse[field]; !ok {
+			t.Errorf("input.converse missing %q", field)
+		}
+	}
+	for _, field := range []string{"inferenceConfig", "outputConfig"} {
+		if _, ok := converse[field]; ok {
+			t.Errorf("input.converse unexpectedly includes %q", field)
+		}
+	}
+}
+
 func TestCounterRouteAndSigV4(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +223,7 @@ func TestCounterPreflightRejectsBeforeIO(t *testing.T) {
 		{name: "missing model name", mutate: func(r *inference.Request) { r.Model.Name = "" }, wantValid: true},
 		{name: "model name contains query delimiter", mutate: func(r *inference.Request) { r.Model.Name = "model?credential" }, wantValid: true},
 		{name: "model name exceeds AWS limit", mutate: func(r *inference.Request) { r.Model.Name = strings.Repeat("a", 257) }, wantValid: true},
-		{name: "unsupported API format", mutate: func(r *inference.Request) { r.Model.APIFormat = llm.APIFormatBedrockConverse }, wantFormat: true},
+		{name: "unknown API format", mutate: func(r *inference.Request) { r.Model.APIFormat = model.APIFormat("future-bedrock-dialect") }, wantValid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

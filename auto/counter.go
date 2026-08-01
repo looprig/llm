@@ -70,7 +70,7 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 		}
 		return xaiprovider.NewCounter(key)
 	case llm.ProviderBedrock:
-		if apiFormat == model.APIFormatAnthropic {
+		if apiFormat == model.APIFormatAnthropic || apiFormat == model.APIFormatBedrockConverse {
 			return nil, &llm.CounterDirectConstructionError{
 				Provider: provider,
 				Reason:   llm.CounterDirectConstructionNeedsSigV4,

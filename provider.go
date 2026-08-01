@@ -40,9 +40,8 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 	case ProviderLMStudio:
 		return f == model.APIFormatOpenAI || f == model.APIFormatAnthropic
 	case ProviderBedrock:
-		// Anthropic-on-Bedrock speaks the Anthropic Messages dialect (the
-		// implemented codec); the native Bedrock Converse dialect is reserved for a
-		// future codec but is a legitimate Bedrock format, so both are admitted here.
+		// Bedrock supports both the existing Anthropic-on-Bedrock InvokeModel
+		// dialect and the native Converse/ConverseStream dialect.
 		return f == model.APIFormatAnthropic || f == APIFormatBedrockConverse
 	case ProviderGoogle:
 		// Google's generateContent backend speaks only the Gemini dialect.

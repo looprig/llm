@@ -159,6 +159,7 @@ github.com/looprig/inference
 github.com/looprig/inference/auth
 github.com/looprig/inference/codec
 github.com/looprig/inference/codec/anthropicapi
+github.com/looprig/inference/codec/bedrockconverse
 github.com/looprig/inference/codec/geminiapi
 github.com/looprig/inference/codec/openairesponses
 github.com/looprig/inference/codec/openaiapi
@@ -171,6 +172,7 @@ github.com/looprig/inference/route
 github.com/looprig/inference/stream
 github.com/looprig/inference/transport
 github.com/looprig/inference/usage
+github.com/looprig/inference/wire/eventstream
 github.com/looprig/inference/wire/jsonbody
 github.com/looprig/inference/wire/sse
 # github.com/openai/openai-go/v3 v3.42.0
