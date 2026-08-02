@@ -46,6 +46,7 @@ type Counter struct {
 	signer      inferauth.Authenticator
 	hc          requestDoer
 	timeout     time.Duration
+	options     config
 }
 
 var _ contextcount.ContextCounter = (*Counter)(nil)
@@ -55,19 +56,25 @@ type requestDoer interface {
 }
 
 // NewCounter constructs an exact provider counter bound to one AWS region.
-func NewCounter(creds auth.SigV4Credentials, region string) (contextcount.ContextCounter, error) {
+func NewCounter(creds auth.SigV4Credentials, region string, options ...Option) (contextcount.ContextCounter, error) {
 	if err := validateConfig(creds, region); err != nil {
 		return nil, err
 	}
-	counter := newCounter(creds, region, defaultEndpoint(region))
+	counter := newCounter(creds, region, defaultEndpoint(region), options...)
 	if counter.endpointErr != nil {
 		return nil, counter.endpointErr
 	}
 	return counter, nil
 }
 
-func newCounter(creds auth.SigV4Credentials, region, endpoint string) *Counter {
+func newCounter(creds auth.SigV4Credentials, region, endpoint string, options ...Option) *Counter {
 	canonical, endpointErr := canonicalCounterEndpoint(endpoint)
+	cfg := config{}
+	for _, option := range options {
+		if option != nil {
+			option(&cfg)
+		}
+	}
 	return &Counter{
 		region:      region,
 		endpoint:    canonical,
@@ -75,6 +82,7 @@ func newCounter(creds auth.SigV4Credentials, region, endpoint string) *Counter {
 		signer:      auth.SigV4(creds, region, bedrockService),
 		hc:          newHTTPClient(),
 		timeout:     defaultCounterTimeout,
+		options:     cfg.clone(),
 	}
 }
 
@@ -168,6 +176,10 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 		return buildCountRequestEnvelope(invokeBody)
 	case model.APIFormatBedrockConverse:
 		converseBody, err := bedrockconverse.EncodeCountTokensInput(req)
+		if err != nil {
+			return nil, err
+		}
+		converseBody, err = c.options.applyConverseCountTokens(converseBody)
 		if err != nil {
 			return nil, err
 		}

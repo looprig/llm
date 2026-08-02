@@ -308,7 +308,7 @@ func TestCodecFor(t *testing.T) {
 			is:     func(c codec.Codec) bool { _, ok := c.(geminiapi.Codec); return ok },
 			want:   "geminiapi.Codec",
 		},
-		{name: "bedrock-converse has no codec yet", format: llm.APIFormatBedrockConverse, wantErr: true},
+		{name: "bedrock-converse requires direct SigV4 construction", format: llm.APIFormatBedrockConverse, wantErr: true},
 		{name: "unknown format fails closed", format: model.APIFormat("bogus"), wantErr: true},
 	}
 	for _, tt := range tests {

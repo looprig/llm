@@ -21,6 +21,7 @@ const (
 	ServiceTierDefault  ServiceTier = "default"
 	ServiceTierPriority ServiceTier = "priority"
 	ServiceTierFlex     ServiceTier = "flex"
+	ServiceTierReserved ServiceTier = "reserved"
 )
 
 // PerformanceLatency selects Bedrock's performanceConfig latency mode.
@@ -42,7 +43,13 @@ type GuardrailOptions struct {
 // CachePointOptions selects a native Converse cachePoint content block.
 type CachePointOptions struct {
 	Type string
+	TTL  string
 }
+
+const (
+	CachePointTTL5m = "5m"
+	CachePointTTL1h = "1h"
+)
 
 type config struct {
 	reasoning                    *ReasoningOptions
@@ -161,7 +168,7 @@ func (c config) hasConverseOptions() bool {
 	return c.reasoning != nil || len(c.additionalModelRequestFields) > 0 || len(c.additionalResponseFieldPaths) > 0 || c.guardrail != nil || c.performanceLatency != "" || c.serviceTier != "" || c.requestMetadata != nil || c.cachePoint != nil
 }
 
-func (c config) applyConverse(body []byte) ([]byte, error) {
+func (c config) applyConverse(body []byte, streaming bool) ([]byte, error) {
 	if !c.hasConverseOptions() {
 		return body, nil
 	}
@@ -173,34 +180,8 @@ func (c config) applyConverse(body []byte) ([]byte, error) {
 		return nil, &OptionError{Reason: "Converse request is not an object"}
 	}
 
-	if c.reasoning != nil || len(c.additionalModelRequestFields) > 0 {
-		additional := make(map[string]json.RawMessage)
-		if len(c.additionalModelRequestFields) > 0 {
-			if err := json.Unmarshal(c.additionalModelRequestFields, &additional); err != nil || additional == nil {
-				return nil, &OptionError{Reason: "additionalModelRequestFields must be a JSON object", Err: err}
-			}
-		}
-		if c.reasoning != nil {
-			thinking := make(map[string]json.RawMessage)
-			thinkingType := c.reasoning.Type
-			if thinkingType == "" {
-				thinkingType = "enabled"
-			}
-			thinking["type"], _ = json.Marshal(thinkingType)
-			if c.reasoning.BudgetTokens != nil {
-				thinking["budget_tokens"], _ = json.Marshal(*c.reasoning.BudgetTokens)
-			}
-			encodedThinking, marshalErr := json.Marshal(thinking)
-			if marshalErr != nil {
-				return nil, &OptionError{Reason: "encode reasoning option", Err: marshalErr}
-			}
-			additional["thinking"] = encodedThinking
-		}
-		encodedAdditional, err := json.Marshal(additional)
-		if err != nil {
-			return nil, &OptionError{Reason: "encode additionalModelRequestFields", Err: err}
-		}
-		fields["additionalModelRequestFields"] = encodedAdditional
+	if err := c.applyAdditionalModelRequestFields(fields); err != nil {
+		return nil, err
 	}
 	if len(c.additionalResponseFieldPaths) > 0 {
 		encoded, err := json.Marshal(c.additionalResponseFieldPaths)
@@ -220,7 +201,7 @@ func (c config) applyConverse(body []byte) ([]byte, error) {
 		if c.guardrail.Trace != "" {
 			guardrail["trace"], _ = json.Marshal(c.guardrail.Trace)
 		}
-		if c.guardrail.StreamProcessingMode != "" {
+		if streaming && c.guardrail.StreamProcessingMode != "" {
 			guardrail["streamProcessingMode"], _ = json.Marshal(c.guardrail.StreamProcessingMode)
 		}
 		encoded, err := json.Marshal(guardrail)
@@ -262,12 +243,71 @@ func (c config) applyConverse(body []byte) ([]byte, error) {
 	return encoded, nil
 }
 
+func (c config) applyConverseCountTokens(body []byte) ([]byte, error) {
+	if c.reasoning == nil && len(c.additionalModelRequestFields) == 0 {
+		return body, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, &OptionError{Reason: "decode CountTokens request", Err: err}
+	}
+	if fields == nil {
+		return nil, &OptionError{Reason: "CountTokens request is not an object"}
+	}
+	if err := c.applyAdditionalModelRequestFields(fields); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return nil, &OptionError{Reason: "encode CountTokens request", Err: err}
+	}
+	return encoded, nil
+}
+
+func (c config) applyAdditionalModelRequestFields(fields map[string]json.RawMessage) error {
+	if c.reasoning == nil && len(c.additionalModelRequestFields) == 0 {
+		return nil
+	}
+	additional := make(map[string]json.RawMessage)
+	if len(c.additionalModelRequestFields) > 0 {
+		if err := json.Unmarshal(c.additionalModelRequestFields, &additional); err != nil || additional == nil {
+			return &OptionError{Reason: "additionalModelRequestFields must be a JSON object", Err: err}
+		}
+	}
+	if c.reasoning != nil {
+		thinking := make(map[string]json.RawMessage)
+		thinkingType := c.reasoning.Type
+		if thinkingType == "" {
+			thinkingType = "enabled"
+		}
+		thinking["type"], _ = json.Marshal(thinkingType)
+		if c.reasoning.BudgetTokens != nil {
+			thinking["budget_tokens"], _ = json.Marshal(*c.reasoning.BudgetTokens)
+		}
+		encodedThinking, err := json.Marshal(thinking)
+		if err != nil {
+			return &OptionError{Reason: "encode reasoning option", Err: err}
+		}
+		additional["thinking"] = encodedThinking
+	}
+	encodedAdditional, err := json.Marshal(additional)
+	if err != nil {
+		return &OptionError{Reason: "encode additionalModelRequestFields", Err: err}
+	}
+	fields["additionalModelRequestFields"] = encodedAdditional
+	return nil
+}
+
 func applyCachePoint(fields map[string]json.RawMessage, options CachePointOptions) error {
 	typ := options.Type
 	if typ == "" {
 		typ = "default"
 	}
-	cachePoint, err := json.Marshal(map[string]string{"type": typ})
+	cachePointFields := map[string]string{"type": typ}
+	if options.TTL != "" {
+		cachePointFields["ttl"] = options.TTL
+	}
+	cachePoint, err := json.Marshal(cachePointFields)
 	if err != nil {
 		return &OptionError{Reason: "encode cachePoint", Err: err}
 	}

@@ -117,7 +117,11 @@ func TestCounterConverseEnvelopeUsesNativeUnion(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	counter := newCounter(counterTestCreds(), "us-east-1", srv.URL)
+	budget := 256
+	counter := newCounter(counterTestCreds(), "us-east-1", srv.URL,
+		WithReasoning(ReasoningOptions{BudgetTokens: &budget}),
+		WithAdditionalModelRequestFields(json.RawMessage(`{"temperature_top_k":50}`)),
+	)
 	got, err := counter.CountContext(context.Background(), req)
 	if err != nil {
 		t.Fatalf("CountContext() error = %v", err)
@@ -150,6 +154,13 @@ func TestCounterConverseEnvelopeUsesNativeUnion(t *testing.T) {
 		if _, ok := converse[field]; ok {
 			t.Errorf("input.converse unexpectedly includes %q", field)
 		}
+	}
+	var additional map[string]json.RawMessage
+	if err := json.Unmarshal(converse["additionalModelRequestFields"], &additional); err != nil {
+		t.Fatalf("additionalModelRequestFields = %v", err)
+	}
+	if string(additional["temperature_top_k"]) != "50" || additional["thinking"] == nil {
+		t.Fatalf("additionalModelRequestFields = %#v, want custom field and thinking", additional)
 	}
 }
 

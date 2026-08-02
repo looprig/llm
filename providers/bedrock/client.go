@@ -1,5 +1,5 @@
-// Package bedrock is an AWS Bedrock Runtime client for Anthropic-on-Bedrock
-// InvokeModel and native Converse/ConverseStream. It routes the selected native
+// Package bedrock is an AWS Bedrock Runtime client for Bedrock InvokeModel and
+// native Converse/ConverseStream. It routes the selected native
 // dialect to the corresponding model path and signs every request with AWS
 // Signature Version 4.
 //
@@ -64,7 +64,7 @@ const (
 	idleConnTimeout       = 90 * time.Second
 )
 
-// Client is a region-bound Anthropic-on-Bedrock inference client. It owns one
+// Client is a region-bound Bedrock inference client. It owns one
 // SigV4 signer (built from the caller's credentials) and one http.Client, and is
 // safe for concurrent use (both are immutable after construction). Connection
 // binding is by provider+region: a request whose Model.Provider is not
@@ -211,7 +211,7 @@ func (c *Client) invokeAnthropic(ctx context.Context, req inference.Request) (*i
 }
 
 func (c *Client) invokeConverse(ctx context.Context, req inference.Request) (*inference.Response, error) {
-	body, err := c.encodeConverse(req)
+	body, err := c.encodeConverse(req, false)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 	if req.Model.APIFormat != model.APIFormatBedrockConverse {
 		return nil, &UnsupportedAPIFormatError{APIFormat: req.Model.APIFormat}
 	}
-	body, err := c.encodeConverse(req)
+	body, err := c.encodeConverse(req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -283,12 +283,12 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 	return withModel(reader, req.Model.Name), nil
 }
 
-func (c *Client) encodeConverse(req inference.Request) ([]byte, error) {
+func (c *Client) encodeConverse(req inference.Request, streaming bool) ([]byte, error) {
 	body, err := bedrockconverse.EncodeRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	return c.options.applyConverse(body)
+	return c.options.applyConverse(body, streaming)
 }
 
 func (c *Client) doSigned(ctx context.Context, request *http.Request) (*http.Response, error) {
