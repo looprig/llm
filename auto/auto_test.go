@@ -158,6 +158,40 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewSpecialAuthDoesNotDiscoverEnvironmentCredentials(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		provider llm.Provider
+		format   model.APIFormat
+		use      string
+	}{
+		{name: "gitlab oauth", provider: llm.ProviderGitLab, format: model.APIFormatOpenAI, use: "gitlab.New"},
+		{name: "github copilot oauth", provider: llm.ProviderGitHubCopilot, format: model.APIFormatOpenAI, use: "githubcopilot.New"},
+		{name: "vertex gcp", provider: llm.ProviderGoogleVertex, format: model.APIFormatGemini, use: "vertex.New"},
+		{name: "sap service key", provider: llm.ProviderSAP, format: model.APIFormatOpenAI, use: "sapcore.New"},
+		{name: "snowflake token", provider: llm.ProviderSnowflakeCortex, format: model.APIFormatOpenAI, use: "snowflake.New"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			selected := model.CustomModel(model.ProviderName(tt.provider), tt.format, "https://example.test/v1", "model")
+			client, err := New(selected, "")
+			if client != nil {
+				t.Fatalf("New() returned %T with no explicit credential", client)
+			}
+			var directErr *CredentialNotConstructibleError
+			if !errors.As(err, &directErr) {
+				t.Fatalf("New() error = %T %v, want CredentialNotConstructibleError", err, err)
+			}
+			if directErr.Provider != tt.provider || directErr.Use != tt.use {
+				t.Errorf("direct error = %+v, want provider %q/use %q", directErr, tt.provider, tt.use)
+			}
+		})
+	}
+}
+
 // TestNewBedrockDirectsToConstructor confirms the SigV4 dispatch decision: a
 // Bedrock model reaches New's dispatch (its RequiredAuth is AuthSigV4, so the
 // empty-APIKey guard does NOT fire — no AuthRequiredError confusion) and returns a

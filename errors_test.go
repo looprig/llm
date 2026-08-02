@@ -65,6 +65,31 @@ func TestAuthSigV4Kind(t *testing.T) {
 	}
 }
 
+func TestProviderSpecificAuthKinds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		kind auth.AuthKind
+		want string
+	}{
+		{name: "oauth", kind: llm.AuthOAuth, want: "oauth"},
+		{name: "gcp", kind: llm.AuthGCP, want: "gcp"},
+		{name: "service key", kind: llm.AuthServiceKey, want: "service_key"},
+		{name: "token", kind: llm.AuthToken, want: "token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.kind == auth.AuthNone || tt.kind == auth.AuthAPIKey || tt.kind == llm.AuthSigV4 {
+				t.Fatalf("auth kind %q collides with an existing kind", tt.kind)
+			}
+			if string(tt.kind) != tt.want {
+				t.Errorf("auth kind = %q, want %q", tt.kind, tt.want)
+			}
+		})
+	}
+}
+
 func TestCounterSupportError(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

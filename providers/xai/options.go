@@ -1,6 +1,8 @@
 package xai
 
-// ReasoningOptions controls xAI's native Responses reasoning object.
+// ReasoningOptions controls xAI reasoning. It is encoded as the Responses
+// reasoning object or Chat Completions reasoning_effort field, as selected by
+// the model APIFormat.
 type ReasoningOptions struct {
 	Effort string `json:"effort,omitempty"`
 }
@@ -22,7 +24,7 @@ type config struct {
 // Option customizes an xAI Responses client at construction time.
 type Option func(*config)
 
-// WithReasoning sets xAI's native reasoning effort.
+// WithReasoning sets xAI's reasoning effort.
 func WithReasoning(options ReasoningOptions) Option {
 	return func(c *config) {
 		copy := options

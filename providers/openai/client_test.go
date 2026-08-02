@@ -18,6 +18,7 @@ import (
 	"github.com/looprig/inference/stream"
 
 	"github.com/looprig/llm"
+	"github.com/looprig/llm/providers/internal/contracttest"
 	"github.com/looprig/llm/providers/openai"
 )
 
@@ -181,6 +182,45 @@ func TestNewInvokeUsesResponsesAndNormalizesProviderFields(t *testing.T) {
 	}
 	if _, ok := body["reasoning_effort"]; ok {
 		t.Error("Responses request contains Chat Completions reasoning_effort field")
+	}
+}
+
+func TestChatCompletionsContract(t *testing.T) {
+	contracttest.OpenAI(t, llm.ProviderOpenAI, "sk-openai-test", func(selected model.Model, key auth.APIKey) (inference.Client, error) {
+		return openai.New(selected, key)
+	})
+}
+
+func TestChatCompletionsReasoningOptionUsesChatField(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("request JSON = %v", err)
+			return
+		}
+		if _, ok := body["messages"]; !ok {
+			t.Error("Chat request missing messages")
+		}
+		var effort string
+		if err := json.Unmarshal(body["reasoning_effort"], &effort); err != nil || effort != "high" {
+			t.Errorf("reasoning_effort = %q, err=%v, want high", effort, err)
+		}
+		if _, ok := body["reasoning"]; ok {
+			t.Error("Chat request contains Responses reasoning object")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chat","model":"gpt-4.1","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenAI), model.APIFormatOpenAI, server.URL+"/v1", "gpt-4.1")
+	client, err := openai.New(selected, "sk-test", openai.WithReasoning(openai.ReasoningOptions{Effort: "high", Summary: "detailed"}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
 	}
 }
 

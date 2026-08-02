@@ -18,8 +18,15 @@ import (
 	"github.com/looprig/inference/stream"
 
 	"github.com/looprig/llm"
+	"github.com/looprig/llm/providers/internal/contracttest"
 	"github.com/looprig/llm/providers/xai"
 )
+
+func TestChatCompletionsContract(t *testing.T) {
+	contracttest.OpenAI(t, llm.ProviderXAI, "xai-test-key", func(selected model.Model, key auth.APIKey) (inference.Client, error) {
+		return xai.New(selected, key)
+	})
+}
 
 func TestNewInvokeUsesResponsesAndXAIOptions(t *testing.T) {
 	t.Parallel()

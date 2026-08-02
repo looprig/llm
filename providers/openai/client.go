@@ -1,6 +1,6 @@
-// Package openai provides the OpenAI Responses API client. OpenAI Chat
-// Completions remains available through inference/codec/openaiapi; this
-// provider deliberately binds the newer item-based Responses wire format.
+// Package openai provides OpenAI Chat Completions and Responses API clients.
+// The selected model's APIFormat chooses the wire dialect while both codecs
+// remain available to callers that need to target either endpoint.
 package openai
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
 	codec "github.com/looprig/inference/codec"
+	chat "github.com/looprig/inference/codec/openaiapi"
 	responses "github.com/looprig/inference/codec/openairesponses"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/route"
@@ -25,9 +26,9 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
-// New constructs an OpenAI Responses API client. The selected model must
-// identify OpenAI and model.APIFormatOpenAIResponses. An empty model base URL
-// uses OpenAI's canonical Responses API root.
+// New constructs an OpenAI Chat Completions or Responses API client. The
+// selected model's APIFormat chooses the bundled wire codec and route; an
+// empty model base URL uses OpenAI's canonical v1 root.
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
 	if err := llm.ValidateModel(selected); err != nil {
 		return nil, err
@@ -60,26 +61,32 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 			Provider:  selected.Provider,
 			APIFormat: selected.APIFormat,
 		},
-		responsesRouter{},
-		requestCodec{config: cfg},
+		apiRouter{},
+		requestCodec{config: cfg, apiFormat: selected.APIFormat},
 		auth.Key(key),
 	), nil
 }
 
-type responsesRouter struct{}
+type apiRouter struct{}
 
-func (responsesRouter) BuildRoute(baseURL string, req inference.Request, mode codec.RequestMode) (route.Route, error) {
-	return route.StaticChat("/responses").BuildRoute(baseURL, req, mode)
+func (apiRouter) BuildRoute(baseURL string, req inference.Request, mode codec.RequestMode) (route.Route, error) {
+	path := "/chat/completions"
+	if req.Model.APIFormat == model.APIFormatOpenAIResponses {
+		path = "/responses"
+	}
+	return route.StaticChat(path).BuildRoute(baseURL, req, mode)
 }
 
 type requestCodec struct {
-	config config
+	config    config
+	apiFormat model.APIFormat
 }
 
 var _ codec.StreamingCodec = requestCodec{}
 
 func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMode) (codec.EncodedRequest, error) {
-	encoded, err := (responses.Codec{}).EncodeRequest(req, mode)
+	base := codecFor(c.apiFormat)
+	encoded, err := base.EncodeRequest(req, mode)
 	if err != nil {
 		return codec.EncodedRequest{}, err
 	}
@@ -96,11 +103,21 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 		return codec.EncodedRequest{}, fmt.Errorf("openai: decode encoded request: %w", err)
 	}
 	if c.config.reasoning != nil {
-		body["reasoning"], err = json.Marshal(c.config.reasoning)
-		if err != nil {
-			return codec.EncodedRequest{}, fmt.Errorf("openai: encode reasoning option: %w", err)
+		if c.apiFormat == model.APIFormatOpenAI {
+			if c.config.reasoning.Effort != "" {
+				body["reasoning_effort"], err = json.Marshal(c.config.reasoning.Effort)
+				if err != nil {
+					return codec.EncodedRequest{}, fmt.Errorf("openai: encode chat reasoning option: %w", err)
+				}
+			}
+			delete(body, "reasoning")
+		} else {
+			body["reasoning"], err = json.Marshal(c.config.reasoning)
+			if err != nil {
+				return codec.EncodedRequest{}, fmt.Errorf("openai: encode reasoning option: %w", err)
+			}
+			delete(body, "reasoning_effort")
 		}
-		delete(body, "reasoning_effort")
 	}
 	if c.config.serviceTier != "" {
 		body["service_tier"], err = json.Marshal(c.config.serviceTier)
@@ -128,10 +145,17 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 	return codec.EncodedRequest{Header: encoded.Header.Clone(), Body: bytes.NewReader(patched)}, nil
 }
 
-func (requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {
-	return (responses.Codec{}).DecodeResponse(body)
+func (c requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {
+	return codecFor(c.apiFormat).DecodeResponse(body)
 }
 
-func (requestCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
-	return (responses.Codec{}).DecodeStream(resp)
+func (c requestCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
+	return codecFor(c.apiFormat).DecodeStream(resp)
+}
+
+func codecFor(apiFormat model.APIFormat) codec.StreamingCodec {
+	if apiFormat == model.APIFormatOpenAI {
+		return chat.Codec{}
+	}
+	return responses.Codec{}
 }

@@ -33,6 +33,25 @@ func (e *AttestationError) Unwrap() error { return e.Err }
 // provider-specific request-signing schemes are llm policy.
 const AuthSigV4 auth.AuthKind = "sigv4"
 
+// AuthOAuth classifies a provider credential obtained through an OAuth flow.
+// The auto factory receives only an APIKey-shaped secret and therefore treats
+// OAuth providers as direct-construction providers until a caller supplies the
+// exchanged access token explicitly.
+const AuthOAuth auth.AuthKind = "oauth"
+
+// AuthGCP classifies Google Cloud application credentials or an exchanged
+// Vertex access token. Vertex construction is direct because auto.New cannot
+// safely discover or refresh ADC credentials from its APIKey input.
+const AuthGCP auth.AuthKind = "gcp"
+
+// AuthServiceKey classifies a provider service-key document that contains more
+// than one credential or endpoint field.
+const AuthServiceKey auth.AuthKind = "service_key"
+
+// AuthToken classifies a bearer/PAT credential whose provider also needs a
+// separate account or tenant identifier.
+const AuthToken auth.AuthKind = "token"
+
 // AuthRequiredError is returned by a provider factory when a provider that requires
 // credentials is given none. Fail-closed. Carries no secret. Provider is the llm
 // provider-policy label; Kind is the inference credential kind (including AuthSigV4).

@@ -82,7 +82,17 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 			Reason:    llm.CounterSupportAPIFormatUnavailable,
 			APIFormat: apiFormat,
 		}
-	case llm.ProviderAzure, llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio:
+	case llm.ProviderAzure, llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio,
+		llm.ProviderAzureCognitiveServices, llm.Provider302AI, llm.ProviderAtomicChat, llm.ProviderBaseten,
+		llm.ProviderCerebras, llm.ProviderCloudflareAIGateway, llm.ProviderCloudflareWorkersAI, llm.ProviderCortecs,
+		llm.ProviderDeepSeek, llm.ProviderDeepInfra, llm.ProviderDigitalOcean, llm.ProviderFrogBot, llm.ProviderFireworks,
+		llm.ProviderGitLab, llm.ProviderGitHubCopilot, llm.ProviderGMICloud, llm.ProviderGoogleVertex,
+		llm.ProviderGoogleVertexAnthropic, llm.ProviderGroq, llm.ProviderHuggingFace, llm.ProviderHelicone,
+		llm.ProviderLlama, llm.ProviderIONet, llm.ProviderMoonshot, llm.ProviderMiniMax, llm.ProviderNVIDIA,
+		llm.ProviderNebius, llm.ProviderOllama, llm.ProviderOllamaCloud, llm.ProviderOpenCode, llm.ProviderOpenCodeGo,
+		llm.ProviderLLMGateway, llm.ProviderSAP, llm.ProviderSTACKIT, llm.ProviderOVHCloud, llm.ProviderScaleway,
+		llm.ProviderSnowflakeCortex, llm.ProviderTogetherAI, llm.ProviderVenice, llm.ProviderVercel, llm.ProviderZAI,
+		llm.ProviderZenMux:
 		return nil, &llm.CounterSupportError{
 			Provider:  provider,
 			Reason:    llm.CounterSupportExactUnavailable,
