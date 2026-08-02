@@ -13,6 +13,7 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	responses "github.com/looprig/inference/codec/openairesponses"
 	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/stream"
@@ -69,7 +70,13 @@ func TestNewInvokeUsesAzureResponsesAndAPIKey(t *testing.T) {
 		model.WithStructuredOutputWithTools(),
 		model.WithSampling(model.Sampling{Effort: model.EffortMedium, MaxTokens: intPtr(128)}),
 	)
-	client, err := azure.New(selected, auth.APIKey("azure-test-key"))
+	client, err := azure.New(
+		selected,
+		auth.APIKey("azure-test-key"),
+		azure.WithReasoning(azure.ReasoningOptions{Effort: "high", Summary: "concise"}),
+		azure.WithMetadata(map[string]string{"tenant": "test"}),
+		azure.WithPromptCacheKey("conversation-1"),
+	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -135,6 +142,59 @@ func TestNewInvokeUsesAzureResponsesAndAPIKey(t *testing.T) {
 	if _, ok := body["text"]; !ok {
 		t.Error("Responses request missing structured-output text configuration")
 	}
+	var reasoning azure.ReasoningOptions
+	decodeField(t, body, "reasoning", &reasoning)
+	if reasoning.Effort != "high" || reasoning.Summary != "concise" {
+		t.Errorf("reasoning = %+v, want explicit Azure reasoning options", reasoning)
+	}
+	var metadata map[string]string
+	decodeField(t, body, "metadata", &metadata)
+	if metadata["tenant"] != "test" {
+		t.Errorf("metadata = %#v, want tenant=test", metadata)
+	}
+	var promptCacheKey string
+	decodeField(t, body, "prompt_cache_key", &promptCacheKey)
+	if promptCacheKey != "conversation-1" {
+		t.Errorf("prompt_cache_key = %q, want conversation-1", promptCacheKey)
+	}
+}
+
+func TestInvokeNormalizesAzureReasoningTextAndContentFilter(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"status":"incomplete",
+			"model":"gpt-4.1",
+			"output":[
+				{"type":"reasoning","content":[{"type":"reasoning_text","text":"direct thought"}]},
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"filtered answer"}]}
+			],
+			"incomplete_details":{"reason":"content_filter"},
+			"usage":{"input_tokens":5,"output_tokens":2}
+		}`)
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1", model.WithThinking())
+	client, err := azure.New(selected, "azure-test-key")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	resp, err := client.Invoke(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if resp.FinishReason != stream.FinishReasonContentFilter {
+		t.Fatalf("FinishReason = %v, want content_filter", resp.FinishReason)
+	}
+	if len(resp.Message.Blocks) != 2 {
+		t.Fatalf("decoded blocks = %d, want reasoning/text", len(resp.Message.Blocks))
+	}
+	if thinking, ok := resp.Message.Blocks[0].(*content.ThinkingBlock); !ok || thinking.Thinking != "direct thought" {
+		t.Errorf("reasoning block = %#v, want direct reasoning text", resp.Message.Blocks[0])
+	}
 }
 
 func TestStreamDecodesAzureResponsesEventsAndUsage(t *testing.T) {
@@ -183,6 +243,55 @@ func TestStreamDecodesAzureResponsesEventsAndUsage(t *testing.T) {
 	result, ok := reader.Result()
 	if !ok || result.Model != "gpt-4.1" || result.Usage == nil || result.Usage.InputTokens != 6 || result.Usage.CacheReadTokens != 1 {
 		t.Errorf("stream result = %+v, ok=%v, want model/usage", result, ok)
+	}
+}
+
+func TestStreamNormalizesAzureReasoningTextAndIncompleteResult(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"in_progress\"}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"direct thought\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"filtered answer\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.incomplete\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n")
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1", model.WithThinking())
+	client, err := azure.New(selected, "azure-test-key")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var chunks []content.Chunk
+	for {
+		chunk, nextErr := reader.Next()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			t.Fatalf("Stream.Next() error = %v", nextErr)
+		}
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("chunks = %#v, want reasoning/text", chunks)
+	}
+	if thinking, ok := chunks[0].(*content.ThinkingChunk); !ok || thinking.Thinking != "direct thought" {
+		t.Errorf("chunk 0 = %#v, want direct reasoning text", chunks[0])
+	}
+	if text, ok := chunks[1].(*content.TextChunk); !ok || text.Text != "filtered answer" {
+		t.Errorf("chunk 1 = %#v, want text", chunks[1])
+	}
+	result, ok := reader.Result()
+	if !ok || result.Model != "gpt-4.1" || result.FinishReason != stream.FinishReasonContentFilter || result.Usage == nil || result.Usage.InputTokens != 5 || result.Usage.OutputTokens != 2 {
+		t.Errorf("stream result = %+v, ok=%v, want content-filter result and usage", result, ok)
 	}
 }
 
@@ -245,6 +354,29 @@ func TestMalformedAndHTTPErrorResponses(t *testing.T) {
 		}
 		if apiErr.Status != http.StatusBadRequest {
 			t.Errorf("APIError.Status = %d, want %d", apiErr.Status, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("stream failure", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"content_filter\",\"message\":\"blocked\"}}}\n\n")
+		}))
+		defer srv.Close()
+		selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1")
+		client, err := azure.New(selected, "azure-test-key")
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+		if err != nil {
+			t.Fatalf("Stream() error = %v", err)
+		}
+		defer func() { _ = reader.Close() }()
+		_, err = reader.Next()
+		var streamErr *responses.StreamAPIError
+		if !errors.As(err, &streamErr) || streamErr.Code != "content_filter" {
+			t.Fatalf("Stream.Next() error = %T %v, want content_filter stream error", err, err)
 		}
 	})
 }

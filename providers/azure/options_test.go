@@ -53,3 +53,28 @@ func TestWithResourceNameCopiesConfiguration(t *testing.T) {
 		t.Fatalf("resourceName = %q, want resource-a", cfg.resourceName)
 	}
 }
+
+func TestWithRequestOptionsCopyConfiguration(t *testing.T) {
+	metadata := map[string]string{"tenant": "test"}
+	var cfg config
+	WithReasoning(ReasoningOptions{Effort: "high", Summary: "concise"})(&cfg)
+	WithMetadata(metadata)(&cfg)
+	WithPromptCacheKey("conversation-1")(&cfg)
+	metadata["tenant"] = "mutated"
+
+	if cfg.reasoning == nil || cfg.reasoning.Effort != "high" || cfg.reasoning.Summary != "concise" {
+		t.Fatalf("reasoning = %+v, want copied reasoning options", cfg.reasoning)
+	}
+	if cfg.metadata["tenant"] != "test" {
+		t.Fatalf("metadata = %#v, want copied metadata", cfg.metadata)
+	}
+	if cfg.promptCacheKey != "conversation-1" {
+		t.Fatalf("promptCacheKey = %q, want conversation-1", cfg.promptCacheKey)
+	}
+
+	clone := cfg.clone()
+	cfg.metadata["tenant"] = "changed"
+	if clone.metadata["tenant"] != "test" {
+		t.Fatalf("clone metadata = %#v, want independent copy", clone.metadata)
+	}
+}

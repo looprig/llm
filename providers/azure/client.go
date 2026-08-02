@@ -1,21 +1,18 @@
 // Package azure provides an Azure OpenAI Responses API client. It keeps
 // Azure's resource endpoint and api-key authentication separate while
-// delegating request, response, tool, reasoning, usage, and SSE semantics to
-// inference's shared OpenAI Responses codec.
+// delegating the common request, response, tool, usage, and SSE semantics to
+// inference's shared OpenAI Responses codec and normalizing Azure-specific
+// reasoning and termination variants locally.
 package azure
 
 import (
 	"fmt"
-	"net/http"
 
-	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
 	codec "github.com/looprig/inference/codec"
-	responses "github.com/looprig/inference/codec/openairesponses"
 	model "github.com/looprig/inference/model"
 	"github.com/looprig/inference/route"
-	"github.com/looprig/inference/stream"
 	"github.com/looprig/inference/transport"
 
 	"github.com/looprig/llm"
@@ -56,7 +53,7 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 			APIFormat: selected.APIFormat,
 		},
 		responsesRouter{},
-		requestCodec{},
+		requestCodec{config: cfg},
 		auth.Header(key, "api-key"),
 	), nil
 }
@@ -65,20 +62,4 @@ type responsesRouter struct{}
 
 func (responsesRouter) BuildRoute(baseURL string, req inference.Request, mode codec.RequestMode) (route.Route, error) {
 	return route.StaticChat("/responses").BuildRoute(baseURL, req, mode)
-}
-
-type requestCodec struct{}
-
-var _ codec.StreamingCodec = requestCodec{}
-
-func (requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMode) (codec.EncodedRequest, error) {
-	return (responses.Codec{}).EncodeRequest(req, mode)
-}
-
-func (requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {
-	return (responses.Codec{}).DecodeResponse(body)
-}
-
-func (requestCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
-	return (responses.Codec{}).DecodeStream(resp)
 }
