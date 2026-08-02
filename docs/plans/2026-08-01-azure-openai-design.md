@@ -51,10 +51,13 @@ read from or embedded in source code.
 
 ## Error and stream behavior
 
-The shared Responses codec remains authoritative for message normalization,
-tool calls/results, reasoning content, structured output, usage, finish
-reasons, malformed JSON, SSE framing, and provider HTTP error decoding. Azure
-only owns endpoint resolution, `api-key` authentication, provider validation,
+The shared Responses codec remains authoritative for the common message
+normalization, tool calls/results, structured output, usage, SSE framing, and
+provider HTTP error decoding. A small Azure wrapper preserves Azure's native
+`reasoning_text` content (including message-level content), maps
+`response.reasoning_text.delta` and `response.incomplete`, and maps
+`incomplete_details.reason:content_filter` to the shared finish reason. Azure
+also owns endpoint resolution, `api-key` authentication, provider validation,
 and its explicit counter boundary.
 
 ## Testing
@@ -66,7 +69,8 @@ Deterministic `httptest` coverage will verify:
   precedence;
 - `api-key` header and absence of bearer authentication;
 - Responses JSON and SSE request/response behavior, including tools,
-  reasoning, structured output, usage, and finish reasons;
+  reasoning (including direct reasoning text), structured output, usage,
+  incomplete/content-filter finish reasons;
 - malformed responses, malformed streams, and HTTP errors;
 - unsupported counter classification;
 - auto-provider dispatch and shared model-policy registration.

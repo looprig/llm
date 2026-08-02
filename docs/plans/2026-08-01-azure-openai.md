@@ -107,7 +107,7 @@ Implement `New(selected model.Model, key auth.APIKey, options ...Option)` with t
 5. use `selected.BaseURL` when non-empty;
 6. otherwise use the explicit resource option, then `AZURE_RESOURCE_NAME`;
 7. validate the resource label and build `https://<resource>.openai.azure.com/openai/v1`;
-8. construct `transport.New` with `route.StaticChat("/responses")`, `responses.Codec` delegation, and `auth.Header(key, "api-key")`.
+8. construct `transport.New` with `route.StaticChat("/responses")`, a codec that delegates common behavior to `responses.Codec` while normalizing Azure reasoning/incomplete variants, and `auth.Header(key, "api-key")`.
 
 `WithResourceName` must copy/normalize only its own string state. No credentials may be read from source or logged.
 
