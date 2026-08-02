@@ -267,4 +267,3 @@ Commit version metadata in the feature branch, merge into local main without ove
 **Step 4: Tag and push after verification**
 
 Create an annotated semantic-version tag, push main and the tag, then verify remote refs and final worktree status.
-

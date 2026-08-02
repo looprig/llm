@@ -63,10 +63,11 @@ func TestNewInvokeAppliesHeadersAndBodyPatch(t *testing.T) {
 		t.Fatalf("Invoke() response = %#v, want one decoded message", resp)
 	}
 
-	if got := (<-headerCh).Get("Authorization"); got != "Bearer secret" {
+	headers := <-headerCh
+	if got := headers.Get("Authorization"); got != "Bearer secret" {
 		t.Errorf("Authorization = %q, want Bearer secret", got)
 	}
-	if got := (<-headerCh).Get("X-Provider"); got != "test" {
+	if got := headers.Get("X-Provider"); got != "test" {
 		t.Errorf("X-Provider = %q, want test", got)
 	}
 	var body map[string]json.RawMessage
@@ -119,6 +120,30 @@ func TestNewStreamUsesOpenAIStreamingCodec(t *testing.T) {
 	}
 	if got, ok := chunks[1].(*content.TextChunk); !ok || got.Text != "done" {
 		t.Errorf("second chunk = %#v, want TextChunk{done}", chunks[1])
+	}
+}
+
+func TestNewStreamRejectsMalformedSSE(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {not-json}\n\n")
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
+	client, err := compat.New(selected, compat.Config{Authenticator: auth.Key("secret")})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+	if _, err := reader.Next(); err == nil {
+		t.Fatal("Stream.Next() error = nil, want malformed SSE error")
 	}
 }
 

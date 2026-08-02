@@ -31,10 +31,13 @@ import (
 // should construct this value from their public options rather than exposing it
 // directly as their own public API.
 type Config struct {
-	Authenticator auth.Authenticator
-	Headers       http.Header
-	Path          string
-	PatchRequest  func(map[string]json.RawMessage) error
+	Authenticator     auth.Authenticator
+	Headers           http.Header
+	Path              string
+	PatchHeaders      func(inference.Request, http.Header)
+	PatchRequest      func(map[string]json.RawMessage) error
+	NormalizeResponse func([]byte) ([]byte, error)
+	NormalizeStream   func(*http.Response) (*http.Response, error)
 }
 
 // Clone returns an independent configuration copy. Header and body-patch state
@@ -87,8 +90,13 @@ func New(selected model.Model, config Config) (inference.Client, error) {
 			Provider:  selected.Provider,
 			APIFormat: selected.APIFormat,
 		},
-		headerRoute{path: path, headers: config.Headers},
-		requestCodec{base: baseCodec, patch: config.PatchRequest},
+		headerRoute{path: path, headers: config.Headers, patch: config.PatchHeaders},
+		requestCodec{
+			base:              baseCodec,
+			patch:             config.PatchRequest,
+			normalizeResponse: config.NormalizeResponse,
+			normalizeStream:   config.NormalizeStream,
+		},
 		config.Authenticator,
 	), nil
 }
@@ -96,6 +104,7 @@ func New(selected model.Model, config Config) (inference.Client, error) {
 type headerRoute struct {
 	path    string
 	headers http.Header
+	patch   func(inference.Request, http.Header)
 }
 
 func (r headerRoute) BuildRoute(baseURL string, req inference.Request, mode codec.RequestMode) (route.Route, error) {
@@ -104,12 +113,17 @@ func (r headerRoute) BuildRoute(baseURL string, req inference.Request, mode code
 		return route.Route{}, err
 	}
 	built.Header = r.headers.Clone()
+	if r.patch != nil {
+		r.patch(req, built.Header)
+	}
 	return built, nil
 }
 
 type requestCodec struct {
-	base  codec.StreamingCodec
-	patch func(map[string]json.RawMessage) error
+	base              codec.StreamingCodec
+	patch             func(map[string]json.RawMessage) error
+	normalizeResponse func([]byte) ([]byte, error)
+	normalizeStream   func(*http.Response) (*http.Response, error)
 }
 
 var _ codec.StreamingCodec = requestCodec{}
@@ -141,10 +155,24 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 }
 
 func (c requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {
+	if c.normalizeResponse != nil {
+		normalized, err := c.normalizeResponse(body)
+		if err != nil {
+			return nil, err
+		}
+		body = normalized
+	}
 	return c.base.DecodeResponse(body)
 }
 
 func (c requestCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
+	if c.normalizeStream != nil {
+		normalized, err := c.normalizeStream(resp)
+		if err != nil {
+			return nil, err
+		}
+		resp = normalized
+	}
 	return c.base.DecodeStream(resp)
 }
 

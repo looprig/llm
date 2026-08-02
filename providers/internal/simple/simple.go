@@ -4,6 +4,8 @@
 package simple
 
 import (
+	"encoding/json"
+
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
 	contextcount "github.com/looprig/inference/contextcount"
@@ -29,6 +31,14 @@ func NewAnthropicCounter(provider llm.Provider) (contextcount.ContextCounter, er
 }
 
 func WithHeader(name, value string) Option { return compat.WithHeader(name, value) }
+
+// WithBodyField is kept in the internal adapter so provider packages can expose
+// only the stable fields their upstream documents, without importing compat.
+func WithBodyField(name string, value any) Option { return compat.WithBodyField(name, value) }
+
+func WithBodyPatch(patch func(map[string]json.RawMessage) error) Option {
+	return compat.WithBodyPatch(patch)
+}
 
 func WithReasoningEffort(value string) Option {
 	return compat.WithBodyField("reasoning_effort", value)

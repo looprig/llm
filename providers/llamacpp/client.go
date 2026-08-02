@@ -1,4 +1,4 @@
-// Package llamacpp provides the documented llamacpp OpenAI-compatible API.
+// Package llamacpp provides the local llama.cpp llama-server OpenAI-compatible API.
 package llamacpp
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/looprig/llm/providers/internal/simple"
 )
 
-const DefaultBaseURL = "https://api.llama.com/compat/v1"
+const DefaultBaseURL = "http://127.0.0.1:8080/v1"
 
 type Option = simple.Option
 

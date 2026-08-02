@@ -20,12 +20,22 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 	definition := simple.Definition{
 		Provider:       llm.ProviderOpenCode,
 		DefaultBaseURL: DefaultBaseURL,
-		DefaultPath:    "/chat/completions",
 		Authentication: auth.AuthAPIKey,
+	}
+	defaults := options
+	switch selected.APIFormat {
+	case model.APIFormatOpenAIResponses:
+		definition.DefaultPath = "/responses"
+	case model.APIFormatAnthropic:
+		definition.DefaultPath = "/messages"
+		definition.KeyHeader = "x-api-key"
+		defaults = append([]Option{simple.WithHeader("anthropic-version", "2023-06-01")}, defaults...)
+	default:
+		definition.DefaultPath = "/chat/completions"
 	}
 	if selected.Provider == model.ProviderName(llm.ProviderOpenCodeGo) {
 		definition.Provider = llm.ProviderOpenCodeGo
 		definition.DefaultBaseURL = DefaultBaseURLGo
 	}
-	return simple.New(selected, key, definition, options...)
+	return simple.New(selected, key, definition, defaults...)
 }

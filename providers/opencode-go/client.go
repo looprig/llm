@@ -1,5 +1,5 @@
-// Package opencode provides the OpenCode Go endpoint using the shared
-// OpenAI-compatible transport semantics.
+// Package opencode provides the OpenCode Go endpoint using the shared Chat,
+// Responses, and Anthropic transport semantics.
 package opencode
 
 import (
@@ -16,10 +16,21 @@ const DefaultBaseURL = "https://opencode.ai/zen/go/v1"
 type Option = simple.Option
 
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
-	return simple.New(selected, key, simple.Definition{
+	definition := simple.Definition{
 		Provider:       llm.ProviderOpenCodeGo,
 		DefaultBaseURL: DefaultBaseURL,
-		DefaultPath:    "/chat/completions",
 		Authentication: auth.AuthAPIKey,
-	}, options...)
+	}
+	defaults := options
+	switch selected.APIFormat {
+	case model.APIFormatOpenAIResponses:
+		definition.DefaultPath = "/responses"
+	case model.APIFormatAnthropic:
+		definition.DefaultPath = "/messages"
+		definition.KeyHeader = "x-api-key"
+		defaults = append([]Option{simple.WithHeader("anthropic-version", "2023-06-01")}, defaults...)
+	default:
+		definition.DefaultPath = "/chat/completions"
+	}
+	return simple.New(selected, key, definition, defaults...)
 }

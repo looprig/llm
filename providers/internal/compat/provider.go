@@ -16,11 +16,15 @@ import (
 // It is intentionally assembled by a public provider package, never discovered
 // from an arbitrary model string.
 type Definition struct {
-	Provider       llm.Provider
-	DefaultBaseURL string
-	DefaultPath    string
-	Authentication auth.AuthKind
-	KeyHeader      string
+	Provider          llm.Provider
+	DefaultBaseURL    string
+	DefaultPath       string
+	Authentication    auth.AuthKind
+	KeyHeader         string
+	Authenticator     func(auth.APIKey) (auth.Authenticator, error)
+	PatchHeaders      func(inference.Request, http.Header)
+	NormalizeResponse func([]byte) ([]byte, error)
+	NormalizeStream   func(*http.Response) (*http.Response, error)
 }
 
 // ProviderOptions is the common option state accepted by simple provider
@@ -119,20 +123,28 @@ func NewProvider(selected model.Model, key auth.APIKey, definition Definition, o
 	}
 
 	var authenticator auth.Authenticator
-	switch definition.Authentication {
-	case auth.AuthNone:
-		authenticator = auth.None()
-	case auth.AuthAPIKey:
-		if key == "" {
-			return nil, &llm.AuthRequiredError{Provider: definition.Provider, Kind: auth.AuthAPIKey}
+	if definition.Authenticator != nil {
+		var err error
+		authenticator, err = definition.Authenticator(key)
+		if err != nil {
+			return nil, err
 		}
-		if definition.KeyHeader != "" {
-			authenticator = auth.Header(key, definition.KeyHeader)
-		} else {
-			authenticator = auth.Key(key)
+	} else {
+		switch definition.Authentication {
+		case auth.AuthNone:
+			authenticator = auth.None()
+		case auth.AuthAPIKey:
+			if key == "" {
+				return nil, &llm.AuthRequiredError{Provider: definition.Provider, Kind: auth.AuthAPIKey}
+			}
+			if definition.KeyHeader != "" {
+				authenticator = auth.Header(key, definition.KeyHeader)
+			} else {
+				authenticator = auth.Key(key)
+			}
+		default:
+			return nil, &UnsupportedAuthenticationError{Provider: definition.Provider, Kind: definition.Authentication}
 		}
-	default:
-		return nil, &UnsupportedAuthenticationError{Provider: definition.Provider, Kind: definition.Authentication}
 	}
 
 	patch := config.PatchRequest
@@ -150,10 +162,13 @@ func NewProvider(selected model.Model, key auth.APIKey, definition Definition, o
 	}
 
 	return New(selected, Config{
-		Authenticator: authenticator,
-		Headers:       config.Headers,
-		Path:          firstNonEmpty(config.Path, definition.DefaultPath),
-		PatchRequest:  patch,
+		Authenticator:     authenticator,
+		Headers:           config.Headers,
+		Path:              firstNonEmpty(config.Path, definition.DefaultPath),
+		PatchHeaders:      definition.PatchHeaders,
+		PatchRequest:      patch,
+		NormalizeResponse: definition.NormalizeResponse,
+		NormalizeStream:   definition.NormalizeStream,
 	})
 }
 

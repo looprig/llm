@@ -17,3 +17,15 @@ func TestNewOpenAIContract(t *testing.T) {
 		return opencode.New(selected, key)
 	})
 }
+
+func TestNewResponsesContract(t *testing.T) {
+	contracttest.Responses(t, llm.ProviderOpenCode, auth.APIKey("key"), func(selected model.Model, key auth.APIKey) (inference.Client, error) {
+		return opencode.New(selected, key)
+	})
+}
+
+func TestNewAnthropicContract(t *testing.T) {
+	contracttest.Anthropic(t, llm.ProviderOpenCode, auth.APIKey("key"), func(selected model.Model, key auth.APIKey) (inference.Client, error) {
+		return opencode.New(selected, key)
+	})
+}

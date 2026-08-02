@@ -1,8 +1,8 @@
 package openai
 
-// ReasoningOptions controls the OpenAI Responses reasoning object. The fields
-// are strings because the Responses API owns the accepted vocabulary and may
-// add values without changing this package's neutral request model.
+// ReasoningOptions controls OpenAI reasoning. Effort is encoded as the
+// Responses reasoning object or Chat Completions reasoning_effort field,
+// depending on the selected model APIFormat. Summary applies to Responses.
 type ReasoningOptions struct {
 	Effort  string `json:"effort,omitempty"`
 	Summary string `json:"summary,omitempty"`
@@ -25,10 +25,10 @@ type config struct {
 	promptCacheKey string
 }
 
-// Option customizes an OpenAI Responses client at construction time.
+// Option customizes an OpenAI client at construction time.
 type Option func(*config)
 
-// WithReasoning sets the Responses reasoning controls. It replaces any
+// WithReasoning sets the provider reasoning controls. It replaces any
 // reasoning controls inferred from model sampling so the caller has one
 // explicit provider-specific policy.
 func WithReasoning(options ReasoningOptions) Option {
@@ -38,7 +38,7 @@ func WithReasoning(options ReasoningOptions) Option {
 	}
 }
 
-// WithServiceTier selects the Responses service tier.
+// WithServiceTier selects the OpenAI service tier.
 func WithServiceTier(tier ServiceTier) Option {
 	return func(c *config) { c.serviceTier = tier }
 }

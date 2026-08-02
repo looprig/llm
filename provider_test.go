@@ -112,8 +112,10 @@ func TestOpenCodeProviderMatrixIsClassified(t *testing.T) {
 		authKind   auth.AuthKind
 	}{
 		{name: "302ai", provider: llm.Provider("302ai"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
+		{name: "openai", provider: llm.ProviderOpenAI, apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses}, authKind: auth.AuthAPIKey},
+		{name: "xai", provider: llm.ProviderXAI, apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses}, authKind: auth.AuthAPIKey},
 		{name: "atomic chat", provider: llm.Provider("atomic-chat"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthNone},
-		{name: "azure cognitive", provider: llm.Provider("azure-cognitive-services"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
+		{name: "azure cognitive", provider: llm.Provider("azure-cognitive-services"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 		{name: "baseten", provider: llm.Provider("baseten"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "cerebras", provider: llm.Provider("cerebras"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "cloudflare ai gateway", provider: llm.Provider("cloudflare-ai-gateway"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
@@ -124,8 +126,8 @@ func TestOpenCodeProviderMatrixIsClassified(t *testing.T) {
 		{name: "digitalocean", provider: llm.Provider("digitalocean"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "frogbot", provider: llm.Provider("frogbot"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "fireworks", provider: llm.Provider("fireworks-ai"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
-		{name: "gitlab", provider: llm.Provider("gitlab"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatAnthropic}, authKind: auth.AuthKind("oauth")},
-		{name: "github copilot", provider: llm.Provider("github-copilot"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses}, authKind: auth.AuthKind("oauth")},
+		{name: "gitlab", provider: llm.Provider("gitlab"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthKind("oauth")},
+		{name: "github copilot", provider: llm.Provider("github-copilot"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthKind("oauth")},
 		{name: "gmi cloud", provider: llm.Provider("gmicloud"), apiFormats: []model.APIFormat{model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 		{name: "google vertex", provider: llm.Provider("google-vertex"), apiFormats: []model.APIFormat{model.APIFormatGemini, model.APIFormatAnthropic}, authKind: auth.AuthKind("gcp")},
 		{name: "google vertex anthropic", provider: llm.Provider("google-vertex-anthropic"), apiFormats: []model.APIFormat{model.APIFormatAnthropic}, authKind: auth.AuthKind("gcp")},
@@ -141,7 +143,7 @@ func TestOpenCodeProviderMatrixIsClassified(t *testing.T) {
 		{name: "ollama", provider: llm.Provider("ollama"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthNone},
 		{name: "ollama cloud", provider: llm.Provider("ollama-cloud"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "opencode zen", provider: llm.Provider("opencode"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
-		{name: "opencode go", provider: llm.Provider("opencode-go"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
+		{name: "opencode go", provider: llm.Provider("opencode-go"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 		{name: "llm gateway", provider: llm.Provider("llmgateway"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 		{name: "sap ai core", provider: llm.Provider("sap-ai-core"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthKind("service_key")},
 		{name: "stackit", provider: llm.Provider("stackit"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
@@ -150,9 +152,9 @@ func TestOpenCodeProviderMatrixIsClassified(t *testing.T) {
 		{name: "snowflake", provider: llm.Provider("snowflake-cortex"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthKind("token")},
 		{name: "together", provider: llm.Provider("togetherai"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
 		{name: "venice", provider: llm.Provider("venice"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses}, authKind: auth.AuthAPIKey},
-		{name: "vercel", provider: llm.Provider("vercel"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
+		{name: "vercel", provider: llm.Provider("vercel"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 		{name: "zai", provider: llm.Provider("zai"), apiFormats: []model.APIFormat{model.APIFormatOpenAI}, authKind: auth.AuthAPIKey},
-		{name: "zenmux", provider: llm.Provider("zenmux"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
+		{name: "zenmux", provider: llm.Provider("zenmux"), apiFormats: []model.APIFormat{model.APIFormatOpenAI, model.APIFormatOpenAIResponses, model.APIFormatAnthropic}, authKind: auth.AuthAPIKey},
 	}
 
 	for _, tt := range tests {

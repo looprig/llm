@@ -42,28 +42,36 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter, Provider302AI, ProviderAtomicChat, ProviderBaseten, ProviderCerebras,
 		ProviderCloudflareWorkersAI, ProviderCortecs, ProviderDeepSeek, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
 		ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderIONet, ProviderMoonshot, ProviderNVIDIA,
-		ProviderNebius, ProviderOllama, ProviderOllamaCloud, ProviderOpenCodeGo, ProviderSTACKIT, ProviderOVHCloud,
-		ProviderScaleway, ProviderTogetherAI, ProviderVercel, ProviderZAI:
+		ProviderNebius, ProviderOllama, ProviderOllamaCloud, ProviderSTACKIT, ProviderOVHCloud,
+		ProviderScaleway, ProviderTogetherAI, ProviderZAI:
 		return f == model.APIFormatOpenAI
-	case ProviderOpenAI, ProviderAzure, ProviderXAI:
+	case ProviderOpenAI, ProviderXAI:
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
+	case ProviderAzure:
 		return f == model.APIFormatOpenAIResponses
 	case ProviderVenice:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
+	case ProviderVercel:
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderAnthropic, ProviderMiniMax, ProviderGMICloud:
 		return f == model.APIFormatAnthropic
 	case ProviderAzureCognitiveServices:
-		return f == model.APIFormatOpenAI || f == model.APIFormatAnthropic
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderCloudflareAIGateway:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
-	case ProviderDeepInfra, ProviderGitLab, ProviderLLMGateway, ProviderZenMux:
+	case ProviderDeepInfra, ProviderLLMGateway:
 		return f == model.APIFormatOpenAI || f == model.APIFormatAnthropic
+	case ProviderGitLab:
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
+	case ProviderZenMux:
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderGitHubCopilot:
-		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
+		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderGoogleVertex:
 		return f == model.APIFormatGemini || f == model.APIFormatAnthropic
 	case ProviderGoogleVertexAnthropic:
 		return f == model.APIFormatAnthropic
-	case ProviderOpenCode:
+	case ProviderOpenCode, ProviderOpenCodeGo:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderSAP, ProviderSnowflakeCortex:
 		return f == model.APIFormatOpenAI

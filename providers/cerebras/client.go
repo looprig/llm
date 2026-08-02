@@ -15,10 +15,12 @@ const DefaultBaseURL = "https://api.cerebras.ai/v1"
 type Option = simple.Option
 
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
+	defaults := []Option{simple.WithHeader("X-Cerebras-3rd-Party-Integration", "opencode")}
+	defaults = append(defaults, options...)
 	return simple.New(selected, key, simple.Definition{
 		Provider:       llm.ProviderCerebras,
 		DefaultBaseURL: DefaultBaseURL,
 		DefaultPath:    "/chat/completions",
 		Authentication: auth.AuthAPIKey,
-	}, options...)
+	}, defaults...)
 }

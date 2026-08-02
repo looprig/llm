@@ -61,7 +61,7 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		if selected.APIFormat == model.APIFormatAnthropic {
 			baseURL = "https://" + resource + ".services.ai.azure.com/anthropic/v1"
 		} else {
-			baseURL = "https://" + resource + ".cognitiveservices.azure.com/openai"
+			baseURL = defaultOpenAIBaseURL(resource)
 		}
 	}
 	selected.BaseURL = baseURL
@@ -69,8 +69,8 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 	definition := simple.Definition{
 		Provider:       llm.ProviderAzureCognitiveServices,
 		DefaultBaseURL: baseURL,
-		DefaultPath:    "/chat/completions",
 		Authentication: auth.AuthAPIKey,
+		KeyHeader:      "api-key",
 	}
 	if selected.APIFormat == model.APIFormatAnthropic {
 		definition.DefaultPath = "/messages"
@@ -79,6 +79,14 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		defaults = append(defaults, cfg.options...)
 		return simple.New(selected, key, definition, defaults...)
 	}
-	definition.KeyHeader = "api-key"
+	if selected.APIFormat == model.APIFormatOpenAIResponses {
+		definition.DefaultPath = "/responses"
+	} else {
+		definition.DefaultPath = "/chat/completions"
+	}
 	return simple.New(selected, key, definition, cfg.options...)
+}
+
+func defaultOpenAIBaseURL(resource string) string {
+	return "https://" + resource + ".cognitiveservices.azure.com/openai/v1"
 }

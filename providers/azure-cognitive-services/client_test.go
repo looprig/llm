@@ -18,6 +18,12 @@ func TestNewOpenAIContract(t *testing.T) {
 	})
 }
 
+func TestNewResponsesContract(t *testing.T) {
+	contracttest.ResponsesWithHeader(t, llm.ProviderAzureCognitiveServices, auth.APIKey("azure-key"), "api-key", func(selected model.Model, key auth.APIKey) (inference.Client, error) {
+		return azurecognitive.New(selected, key, azurecognitive.WithResourceName("resource"))
+	})
+}
+
 func TestNewAnthropicContract(t *testing.T) {
 	contracttest.Anthropic(t, llm.ProviderAzureCognitiveServices, auth.APIKey("azure-key"), func(selected model.Model, key auth.APIKey) (inference.Client, error) {
 		return azurecognitive.New(selected, key, azurecognitive.WithResourceName("resource"))
