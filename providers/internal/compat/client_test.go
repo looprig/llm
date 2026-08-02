@@ -129,3 +129,40 @@ func TestNewRejectsMissingAuthenticator(t *testing.T) {
 		t.Fatalf("New() = (%T, %v), want nil client and error", client, err)
 	}
 }
+
+func TestNewProviderResolvesDefaultsAndOptions(t *testing.T) {
+	t.Parallel()
+
+	bodyCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyCh <- body
+		if got := r.Header.Get("X-Test"); got != "yes" {
+			t.Errorf("X-Test = %q, want yes", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, "", "model")
+	client, err := compat.NewProvider(selected, "secret", compat.Definition{
+		Provider:       llm.ProviderOpenRouter,
+		DefaultBaseURL: srv.URL,
+		DefaultPath:    "/chat/completions",
+		Authentication: auth.AuthAPIKey,
+	}, compat.WithHeader("X-Test", "yes"), compat.WithBodyField("reasoning_effort", "high"))
+	if err != nil {
+		t.Fatalf("NewProvider() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+		t.Fatalf("request body JSON error = %v", err)
+	}
+	if string(body["reasoning_effort"]) != `"high"` {
+		t.Errorf("reasoning_effort = %s, want %q", body["reasoning_effort"], `"high"`)
+	}
+}
