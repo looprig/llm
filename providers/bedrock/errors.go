@@ -61,7 +61,7 @@ func (e *BodyTransformError) Unwrap() error { return e.Err }
 type StreamingNotSupportedError struct{}
 
 func (*StreamingNotSupportedError) Error() string {
-	return "bedrock: streaming (AWS eventstream) is not yet implemented; use Invoke"
+	return "bedrock: Anthropic InvokeModel streaming is not supported; use native Bedrock ConverseStream"
 }
 
 // CounterStateReason classifies an unusable CountTokens counter boundary.

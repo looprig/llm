@@ -80,7 +80,6 @@ func eventStreamFrame(event, payload string) []byte {
 func eventStreamBody() []byte {
 	frames := [][]byte{
 		eventStreamFrame("messageStart", `{"role":"assistant"}`),
-		eventStreamFrame("contentBlockStart", `{"contentBlockIndex":0,"start":{}}`),
 		eventStreamFrame("contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"streamed"}}`),
 		eventStreamFrame("contentBlockStop", `{"contentBlockIndex":0}`),
 		eventStreamFrame("messageStop", `{"stopReason":"end_turn"}`),

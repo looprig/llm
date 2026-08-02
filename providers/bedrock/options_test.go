@@ -125,6 +125,36 @@ func TestApplyCountTokensIncludesOnlyAdditionalModelRequestFields(t *testing.T) 
 	}
 }
 
+func TestApplyCountTokensIncludesPromptCachePoint(t *testing.T) {
+	t.Parallel()
+
+	config := config{}
+	WithPromptCachePoint(CachePointOptions{TTL: CachePointTTL1h})(&config)
+	body, err := config.applyConverseCountTokens([]byte(`{"messages":[{"role":"user","content":[{"text":"hello"}]}]}`))
+	if err != nil {
+		t.Fatalf("applyConverseCountTokens() error = %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatalf("body = %v", err)
+	}
+	var messages []map[string]json.RawMessage
+	if err := json.Unmarshal(fields["messages"], &messages); err != nil {
+		t.Fatalf("messages = %v", err)
+	}
+	var contentBlocks []map[string]json.RawMessage
+	if err := json.Unmarshal(messages[0]["content"], &contentBlocks); err != nil {
+		t.Fatalf("content = %v", err)
+	}
+	var cachePoint map[string]json.RawMessage
+	if err := json.Unmarshal(contentBlocks[1]["cachePoint"], &cachePoint); err != nil {
+		t.Fatalf("cachePoint = %v", err)
+	}
+	if got := string(cachePoint["ttl"]); got != `"1h"` {
+		t.Errorf("cachePoint.ttl = %s, want 1h", got)
+	}
+}
+
 func TestApplyCachePointIncludesTTL(t *testing.T) {
 	t.Parallel()
 

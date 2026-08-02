@@ -244,7 +244,7 @@ func (c config) applyConverse(body []byte, streaming bool) ([]byte, error) {
 }
 
 func (c config) applyConverseCountTokens(body []byte) ([]byte, error) {
-	if c.reasoning == nil && len(c.additionalModelRequestFields) == 0 {
+	if c.reasoning == nil && len(c.additionalModelRequestFields) == 0 && c.cachePoint == nil {
 		return body, nil
 	}
 	var fields map[string]json.RawMessage
@@ -256,6 +256,11 @@ func (c config) applyConverseCountTokens(body []byte) ([]byte, error) {
 	}
 	if err := c.applyAdditionalModelRequestFields(fields); err != nil {
 		return nil, err
+	}
+	if c.cachePoint != nil {
+		if err := applyCachePoint(fields, *c.cachePoint); err != nil {
+			return nil, err
+		}
 	}
 	encoded, err := json.Marshal(fields)
 	if err != nil {
