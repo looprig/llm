@@ -53,6 +53,7 @@ import (
 	heliconeprovider "github.com/looprig/llm/providers/helicone"
 	huggingfaceprovider "github.com/looprig/llm/providers/huggingface"
 	ionetprovider "github.com/looprig/llm/providers/ionet"
+	llamaprovider "github.com/looprig/llm/providers/llama"
 	llamacppprovider "github.com/looprig/llm/providers/llamacpp"
 	llmgatewayprovider "github.com/looprig/llm/providers/llmgateway"
 	minimaxprovider "github.com/looprig/llm/providers/minimax"
@@ -262,6 +263,8 @@ func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Clien
 	case llm.ProviderHelicone:
 		return heliconeprovider.New(selected, key)
 	case llm.ProviderLlama:
+		return llamaprovider.New(selected, key)
+	case llm.ProviderLlamaCPP:
 		return llamacppprovider.New(selected, key)
 	case llm.ProviderIONet:
 		return ionetprovider.New(selected, key)

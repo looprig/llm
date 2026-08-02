@@ -46,6 +46,7 @@ const (
 	ProviderHuggingFace            Provider = "huggingface"
 	ProviderHelicone               Provider = "helicone"
 	ProviderLlama                  Provider = "llama"
+	ProviderLlamaCPP               Provider = "llama.cpp"
 	ProviderIONet                  Provider = "io-net"
 	ProviderMoonshot               Provider = "moonshotai"
 	ProviderMiniMax                Provider = "minimax"

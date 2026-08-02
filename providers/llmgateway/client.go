@@ -22,12 +22,7 @@ func WithReasoningEffort(value string) Option { return simple.WithReasoningEffor
 func WithThinkingBudget(budget int) Option { return simple.WithThinkingBudget(budget) }
 
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
-	defaults := []Option{
-		simple.WithHeader("HTTP-Referer", "https://opencode.ai/"),
-		simple.WithHeader("X-Title", "opencode"),
-		simple.WithHeader("X-Source", "opencode"),
-	}
-	defaults = append(defaults, options...)
+	defaults := append([]Option(nil), options...)
 	definition := simple.Definition{
 		Provider:       llm.ProviderLLMGateway,
 		DefaultBaseURL: DefaultBaseURL,

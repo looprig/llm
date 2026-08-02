@@ -123,3 +123,85 @@ func TestDeploymentDiscovery(t *testing.T) {
 		t.Fatalf("Invoke() after discovery error = %v", err)
 	}
 }
+
+func TestModelParamsAreMergedIntoHarmonizedChatRequest(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			_, _ = fmt.Fprint(w, `{"access_token":"token","expires_in":3600}`)
+		case "/v2/chat":
+			var body map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("request JSON: %v", err)
+			}
+			var effort string
+			if err := json.Unmarshal(body["reasoning_effort"], &effort); err != nil || effort != "high" {
+				t.Errorf("reasoning_effort = %q, err=%v, want high", effort, err)
+			}
+			var topK int
+			if err := json.Unmarshal(body["top_k"], &topK); err != nil || topK != 32 {
+				t.Errorf("top_k = %d, err=%v, want 32", topK, err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	key := sap.ServiceKey{ClientID: "client", ClientSecret: "secret", TokenURL: server.URL}
+	key.ServiceURLs.AIAPIURL = server.URL
+	selected := model.CustomModel(model.ProviderName(llm.ProviderSAP), model.APIFormatOpenAI, server.URL, "model")
+	client, err := sap.New(selected, key, sap.WithModelParams(map[string]any{
+		"reasoning_effort": "high",
+		"top_k":            32,
+	}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+}
+
+func TestDiscoveryFailureIsRetryable(t *testing.T) {
+	var discoveryCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			_, _ = fmt.Fprint(w, `{"access_token":"token","expires_in":3600}`)
+		case "/v2/lm/deployments":
+			if discoveryCalls.Add(1) == 1 {
+				http.Error(w, `temporary`, http.StatusBadGateway)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"resources":[{"id":"deployment","deploymentUrl":"http://`+r.Host+`/deployment","configurationName":"defaultOrchestrationConfig","status":"RUNNING"}]}`)
+		case "/deployment/v2/chat":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	key := sap.ServiceKey{ClientID: "client", ClientSecret: "secret", TokenURL: server.URL}
+	key.ServiceURLs.AIAPIURL = server.URL
+	selected := model.CustomModel(model.ProviderName(llm.ProviderSAP), model.APIFormatOpenAI, "", "model")
+	client, err := sap.New(selected, key)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err == nil {
+		t.Fatal("first Invoke() error = nil, want discovery failure")
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("second Invoke() error = %v, want retry after transient discovery failure", err)
+	}
+	if got, want := discoveryCalls.Load(), int32(2); got != want {
+		t.Fatalf("discovery calls = %d, want %d", got, want)
+	}
+}

@@ -70,7 +70,7 @@ func TestOpenAIChatExchangesAndCachesDirectAccessToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, srv.URL, "model")
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, srv.URL, "duo-chat-gpt-5-1")
 	client, err := gitlab.New(selected, auth.APIKey("gitlab-pat"), gitlab.WithInstanceURL(srv.URL), gitlab.WithFeatureFlag("duo_agent_platform", true), gitlab.WithAIGatewayHeader("X-Custom-Gateway", "yes"))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -102,6 +102,160 @@ func TestOpenAIChatExchangesAndCachesDirectAccessToken(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatSendsGitLabUpstreamModelID(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v4/ai/third_party_agents/direct_access" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"token":"direct-token","headers":{}}`)
+			return
+		}
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("inference body: %v", err)
+		}
+		var modelID string
+		if err := json.Unmarshal(body["model"], &modelID); err != nil {
+			t.Fatalf("model field: %v", err)
+		}
+		if modelID != "gpt-5.1-2025-11-13" {
+			t.Errorf("outbound model = %q, want mapped upstream ID", modelID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"id","model":"gpt-5.1-2025-11-13","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, server.URL, "duo-chat-gpt-5-1")
+	client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(server.URL))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+}
+
+func TestOpenAIChatAllowsExplicitUpstreamModelIDOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v4/ai/third_party_agents/direct_access" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"token":"direct-token","headers":{}}`)
+			return
+		}
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("inference body: %v", err)
+		}
+		var modelID string
+		_ = json.Unmarshal(body["model"], &modelID)
+		if modelID != "provider-model" {
+			t.Errorf("outbound model = %q, want provider-model", modelID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"id","model":"provider-model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, server.URL, "custom-alias")
+	client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(server.URL), gitlab.WithUpstreamModelID("provider-model", model.APIFormatOpenAI))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+}
+
+func TestOpenAIChatRefreshesDirectAccessTokenOnceAfterInference401(t *testing.T) {
+	var exchangeCalls atomic.Int32
+	var inferenceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/ai/third_party_agents/direct_access":
+			call := exchangeCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"token":"direct-token-`+strings.TrimSpace(string(rune('0'+call)))+`","headers":{}}`)
+		case "/chat/completions":
+			call := inferenceCalls.Add(1)
+			if call == 1 {
+				http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"id","model":"gpt-5.1-2025-11-13","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, server.URL, "duo-chat-gpt-5-1")
+	client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(server.URL))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v, want one retry", err)
+	}
+	if got, want := exchangeCalls.Load(), int32(2); got != want {
+		t.Fatalf("exchange calls = %d, want %d", got, want)
+	}
+	if got, want := inferenceCalls.Load(), int32(2); got != want {
+		t.Fatalf("inference calls = %d, want %d", got, want)
+	}
+}
+
+func TestOpenAIChatRefreshesDirectAccessTokenOnceAfterStream401(t *testing.T) {
+	var exchangeCalls atomic.Int32
+	var inferenceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/ai/third_party_agents/direct_access":
+			exchangeCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"token":"direct-token","headers":{}}`)
+		case "/chat/completions":
+			call := inferenceCalls.Add(1)
+			if call == 1 {
+				http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, server.URL, "duo-chat-gpt-5-1")
+	client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(server.URL))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want one retry", err)
+	}
+	defer func() { _ = reader.Close() }()
+	if _, err := reader.Next(); err != nil {
+		t.Fatalf("Stream.Next() error = %v", err)
+	}
+	if _, err := reader.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("stream terminal error = %v, want EOF", err)
+	}
+	if got, want := exchangeCalls.Load(), int32(2); got != want {
+		t.Fatalf("exchange calls = %d, want %d", got, want)
+	}
+	if got, want := inferenceCalls.Load(), int32(2); got != want {
+		t.Fatalf("inference calls = %d, want %d", got, want)
+	}
+}
+
 func TestAnthropicAndResponsesRoutes(t *testing.T) {
 	t.Run("anthropic", func(t *testing.T) {
 		var exchangeCalls atomic.Int32
@@ -125,7 +279,7 @@ func TestAnthropicAndResponsesRoutes(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":"id","type":"message","role":"assistant","model":"model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`)
 		}))
 		defer srv.Close()
-		selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatAnthropic, srv.URL, "model")
+		selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatAnthropic, srv.URL, "duo-chat-sonnet-4-6")
 		client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(srv.URL))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -153,7 +307,7 @@ func TestAnthropicAndResponsesRoutes(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":"resp","object":"response","model":"model","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
 		}))
 		defer srv.Close()
-		selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAIResponses, srv.URL, "model")
+		selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAIResponses, srv.URL, "duo-chat-gpt-5-codex")
 		client, err := gitlab.New(selected, "gitlab-pat", gitlab.WithInstanceURL(srv.URL))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -174,7 +328,7 @@ func TestDirectAccessExchangeErrorDoesNotExposeCredential(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, srv.URL, "model")
+	selected := model.CustomModel(model.ProviderName(llm.ProviderGitLab), model.APIFormatOpenAI, srv.URL, "duo-chat-gpt-5-1")
 	client, err := gitlab.New(selected, "secret-pat", gitlab.WithInstanceURL(srv.URL))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

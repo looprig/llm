@@ -17,6 +17,9 @@ const DefaultBaseURLGo = "https://opencode.ai/zen/go/v1"
 type Option = simple.Option
 
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
+	if selected.Provider != model.ProviderName(llm.ProviderOpenCode) {
+		return nil, &model.ValidationError{Field: "Provider", Reason: "opencode constructor received a different provider model"}
+	}
 	definition := simple.Definition{
 		Provider:       llm.ProviderOpenCode,
 		DefaultBaseURL: DefaultBaseURL,
@@ -32,10 +35,6 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		defaults = append([]Option{simple.WithHeader("anthropic-version", "2023-06-01")}, defaults...)
 	default:
 		definition.DefaultPath = "/chat/completions"
-	}
-	if selected.Provider == model.ProviderName(llm.ProviderOpenCodeGo) {
-		definition.Provider = llm.ProviderOpenCodeGo
-		definition.DefaultBaseURL = DefaultBaseURLGo
 	}
 	return simple.New(selected, key, definition, defaults...)
 }

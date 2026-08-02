@@ -88,7 +88,7 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 		llm.ProviderDeepSeek, llm.ProviderDeepInfra, llm.ProviderDigitalOcean, llm.ProviderFrogBot, llm.ProviderFireworks,
 		llm.ProviderGitLab, llm.ProviderGitHubCopilot, llm.ProviderGMICloud, llm.ProviderGoogleVertex,
 		llm.ProviderGoogleVertexAnthropic, llm.ProviderGroq, llm.ProviderHuggingFace, llm.ProviderHelicone,
-		llm.ProviderLlama, llm.ProviderIONet, llm.ProviderMoonshot, llm.ProviderMiniMax, llm.ProviderNVIDIA,
+		llm.ProviderLlama, llm.ProviderLlamaCPP, llm.ProviderIONet, llm.ProviderMoonshot, llm.ProviderMiniMax, llm.ProviderNVIDIA,
 		llm.ProviderNebius, llm.ProviderOllama, llm.ProviderOllamaCloud, llm.ProviderOpenCode, llm.ProviderOpenCodeGo,
 		llm.ProviderLLMGateway, llm.ProviderSAP, llm.ProviderSTACKIT, llm.ProviderOVHCloud, llm.ProviderScaleway,
 		llm.ProviderSnowflakeCortex, llm.ProviderTogetherAI, llm.ProviderVenice, llm.ProviderVercel, llm.ProviderZAI,

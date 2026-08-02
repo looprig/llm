@@ -4,12 +4,19 @@
 package gitlab
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
+	"github.com/looprig/inference/stream"
 
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/internal/simple"
@@ -27,10 +34,11 @@ const (
 type Option func(*options)
 
 type options struct {
-	simple       []simple.Option
-	gatewayURL   string
-	instanceURL  string
-	featureFlags map[string]bool
+	simple        []simple.Option
+	gatewayURL    string
+	instanceURL   string
+	featureFlags  map[string]bool
+	modelOverride *modelOverride
 }
 
 func WithHeader(name, value string) Option {
@@ -62,6 +70,15 @@ func WithFeatureFlag(name string, enabled bool) Option {
 	}
 }
 
+// WithUpstreamModelID explicitly selects a documented upstream model ID for a
+// custom or newer GitLab alias. The API format must match the selected model so
+// a Chat/Responses/Anthropic request cannot be sent to the wrong upstream API.
+func WithUpstreamModelID(id string, apiFormat model.APIFormat) Option {
+	return func(opts *options) {
+		opts.modelOverride = &modelOverride{ID: id, Format: apiFormat}
+	}
+}
+
 func WithAIGatewayHeader(name, value string) Option { return WithHeader(name, value) }
 
 func WithReasoningEffort(value string) Option {
@@ -85,6 +102,13 @@ func New(selected model.Model, key auth.APIKey, providerOptions ...Option) (infe
 	if key == "" {
 		return nil, &llm.AuthRequiredError{Provider: llm.ProviderGitLab, Kind: llm.AuthOAuth}
 	}
+	if err := llm.ValidateModel(selected); err != nil {
+		return nil, err
+	}
+	upstreamModel, err := resolveModel(selected.Name, selected.APIFormat, configured.modelOverride)
+	if err != nil {
+		return nil, err
+	}
 	instanceURL := configured.instanceURL
 	if instanceURL == "" {
 		instanceURL = strings.TrimRight(strings.TrimSpace(os.Getenv(instanceEnvironment)), "/")
@@ -105,13 +129,22 @@ func New(selected model.Model, key auth.APIKey, providerOptions ...Option) (infe
 	if err := validateInstanceURL(gatewayURL); err != nil {
 		return nil, err
 	}
+	directAuthenticator := newDirectAccessAuthenticator(key, instanceURL, configured.featureFlags)
 	definition := simple.Definition{
 		Provider:       llm.ProviderGitLab,
 		Authentication: auth.AuthAPIKey,
 		Authenticator: func(_ auth.APIKey) (auth.Authenticator, error) {
-			return newDirectAccessAuthenticator(key, instanceURL, gatewayURL, configured.featureFlags), nil
+			return directAuthenticator, nil
 		},
 	}
+	modelPatch := simple.WithBodyPatch(func(body map[string]json.RawMessage) error {
+		encoded, err := json.Marshal(upstreamModel)
+		if err != nil {
+			return err
+		}
+		body["model"] = encoded
+		return nil
+	})
 	if selected.APIFormat == model.APIFormatAnthropic {
 		definition.DefaultPath = "/messages"
 		definition.DefaultBaseURL = gatewayURL + "/ai/v1/proxy/anthropic"
@@ -124,7 +157,12 @@ func New(selected model.Model, key auth.APIKey, providerOptions ...Option) (infe
 			simple.WithHeader("anthropic-beta", "context-1m-2025-08-07"),
 		}
 		defaults = append(defaults, configured.simple...)
-		return simple.New(selected, key, definition, defaults...)
+		defaults = append(defaults, modelPatch)
+		client, err := simple.New(selected, key, definition, defaults...)
+		if err != nil {
+			return nil, err
+		}
+		return &authRetryClient{inner: client, authenticator: directAuthenticator}, nil
 	}
 	if selected.APIFormat == model.APIFormatOpenAIResponses {
 		definition.DefaultPath = "/responses"
@@ -139,5 +177,38 @@ func New(selected model.Model, key auth.APIKey, providerOptions ...Option) (infe
 		simple.WithHeader("User-Agent", "looprig-llm-gitlab"),
 	}
 	defaults = append(defaults, configured.simple...)
-	return simple.New(selected, key, definition, defaults...)
+	defaults = append(defaults, modelPatch)
+	client, err := simple.New(selected, key, definition, defaults...)
+	if err != nil {
+		return nil, err
+	}
+	return &authRetryClient{inner: client, authenticator: directAuthenticator}, nil
+}
+
+type authRetryClient struct {
+	inner         inference.Client
+	authenticator *directAccessAuthenticator
+}
+
+func (c *authRetryClient) Invoke(ctx context.Context, req inference.Request) (*inference.Response, error) {
+	response, err := c.inner.Invoke(ctx, req)
+	if !isInferenceUnauthorized(err) {
+		return response, err
+	}
+	c.authenticator.invalidate()
+	return c.inner.Invoke(ctx, req)
+}
+
+func (c *authRetryClient) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
+	reader, err := c.inner.Stream(ctx, req)
+	if !isInferenceUnauthorized(err) {
+		return reader, err
+	}
+	c.authenticator.invalidate()
+	return c.inner.Stream(ctx, req)
+}
+
+func isInferenceUnauthorized(err error) bool {
+	var apiErr *failure.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized
 }

@@ -16,7 +16,7 @@ func TestNewCounterIsExplicitlyUnsupported(t *testing.T) {
 		t.Fatalf("NewCounter() = (%T, %v), want nil and typed error", counter, err)
 	}
 	var supportErr *llm.CounterSupportError
-	if !errors.As(err, &supportErr) || supportErr.Provider != llm.ProviderLlama {
-		t.Fatalf("NewCounter() error = %T %v, want provider-bound CounterSupportError", err, err)
+	if !errors.As(err, &supportErr) || supportErr.Provider != llm.ProviderLlamaCPP {
+		t.Fatalf("NewCounter() error = %T %v, want llama.cpp CounterSupportError", err, err)
 	}
 }

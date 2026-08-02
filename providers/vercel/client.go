@@ -44,10 +44,6 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 	} else {
 		definition.DefaultPath = "/chat/completions"
 	}
-	defaults := []Option{
-		simple.WithHeader("http-referer", "https://opencode.ai/"),
-		simple.WithHeader("x-title", "opencode"),
-	}
-	defaults = append(defaults, options...)
+	defaults := append([]Option(nil), options...)
 	return simple.New(selected, key, definition, defaults...)
 }
