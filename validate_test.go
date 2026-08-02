@@ -50,6 +50,16 @@ func TestValidateModel(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid azure responses https",
+			model:   model.Model{Provider: pn(llm.ProviderAzure), APIFormat: model.APIFormatOpenAIResponses, BaseURL: "https://resource.openai.azure.com/openai/v1", Name: "gpt-4.1"},
+			wantErr: false,
+		},
+		{
+			name:    "valid azure responses empty baseurl for resource resolution",
+			model:   model.Model{Provider: pn(llm.ProviderAzure), APIFormat: model.APIFormatOpenAIResponses, BaseURL: "", Name: "gpt-4.1"},
+			wantErr: false,
+		},
+		{
 			name:    "valid lmstudio openai http localhost",
 			model:   model.Model{Provider: pn(llm.ProviderLMStudio), APIFormat: model.APIFormatOpenAI, BaseURL: "http://localhost:1234", Name: "qwen"},
 			wantErr: false,

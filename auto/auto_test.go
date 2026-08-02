@@ -57,6 +57,10 @@ func xAIResponsesModel(name string) model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderXAI), model.APIFormatOpenAIResponses, "https://api.x.ai/v1", name, model.WithTools(), model.WithThinking())
 }
 
+func azureResponsesModel(name string) model.Model {
+	return model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, "https://resource.openai.azure.com/openai/v1", name, model.WithTools(), model.WithThinking())
+}
+
 // TestNew exercises the dispatch + fail-closed auth contract: valid models build a
 // non-nil client, an unknown/self-contradictory model is rejected before dispatch
 // with a *model.ValidationError, and a key-requiring provider given no key fails
@@ -78,6 +82,7 @@ func TestNew(t *testing.T) {
 		{name: "openai with key", model: openAIResponsesModel("gpt-5"), key: "sk-openai-key"},
 		{name: "anthropic with key", model: anthropicMessagesModel("claude-sonnet-4-6"), key: "sk-ant-key"},
 		{name: "xai with key", model: xAIResponsesModel("grok-4-5"), key: "xai-key"},
+		{name: "azure with key", model: azureResponsesModel("gpt-4.1"), key: "azure-key"},
 		{name: "google with key", model: geminiFlashModel(), key: "AIza-k"},
 		{name: "lmstudio without key (AuthNone)", model: lmStudioLocalModel("qwen"), key: ""},
 		{name: "lmstudio ignores a supplied key", model: lmStudioLocalModel("qwen"), key: "k"},
@@ -87,6 +92,7 @@ func TestNew(t *testing.T) {
 		{name: "openai empty key fails closed", model: openAIResponsesModel("gpt-5"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "anthropic empty key fails closed", model: anthropicMessagesModel("claude-sonnet-4-6"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "xai empty key fails closed", model: xAIResponsesModel("grok-4-5"), key: "", wantErr: true, wantAuthReq: true},
+		{name: "azure empty key fails closed", model: azureResponsesModel("gpt-4.1"), key: "", wantErr: true, wantAuthReq: true},
 		{name: "google empty key fails closed", model: geminiFlashModel(), key: "", wantErr: true, wantAuthReq: true},
 		{
 			name:    "unknown provider rejected before dispatch",

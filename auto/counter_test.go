@@ -186,6 +186,22 @@ func TestNewCounterPriorityProviders(t *testing.T) {
 	}
 }
 
+func TestNewCounterAzureUnsupported(t *testing.T) {
+	t.Parallel()
+
+	got, err := NewCounter(counterModel(llm.ProviderAzure, model.APIFormatOpenAIResponses, ""), "azure-counter")
+	if got != nil {
+		t.Fatalf("NewCounter() = %T alongside error, want nil", got)
+	}
+	var supportErr *llm.CounterSupportError
+	if !errors.As(err, &supportErr) {
+		t.Fatalf("NewCounter() error = %T %v, want *llm.CounterSupportError", err, err)
+	}
+	if supportErr.Provider != llm.ProviderAzure || supportErr.Reason != llm.CounterSupportExactUnavailable || supportErr.APIFormat != model.APIFormatOpenAIResponses {
+		t.Fatalf("CounterSupportError = %+v, want Azure exact-counter-unavailable", supportErr)
+	}
+}
+
 func TestNewCounterOrderedErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -15,7 +15,7 @@ func (p Provider) RequiresKey() (bool, error) {
 	switch p {
 	case ProviderLMStudio:
 		return false, nil
-	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAnthropic, ProviderXAI, ProviderGoogle:
+	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAnthropic, ProviderXAI, ProviderGoogle:
 		return true, nil
 	case ProviderBedrock:
 		// Bedrock authenticates with SigV4 credentials, not an API key; this legacy
@@ -33,7 +33,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 	switch p {
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter:
 		return f == model.APIFormatOpenAI
-	case ProviderOpenAI, ProviderXAI:
+	case ProviderOpenAI, ProviderAzure, ProviderXAI:
 		return f == model.APIFormatOpenAIResponses
 	case ProviderAnthropic:
 		return f == model.APIFormatAnthropic
@@ -58,7 +58,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 // with no default returns false, so ValidateModel keeps requiring an explicit base.
 func (p Provider) allowsEmptyBaseURL() bool {
 	switch p {
-	case ProviderBedrock, ProviderChutes, ProviderPhala, ProviderOpenRouter, ProviderOpenAI, ProviderAnthropic, ProviderXAI, ProviderLMStudio, ProviderGoogle:
+	case ProviderBedrock, ProviderChutes, ProviderPhala, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAnthropic, ProviderXAI, ProviderLMStudio, ProviderGoogle:
 		return true
 	default:
 		return false
@@ -72,7 +72,7 @@ func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 	switch p {
 	case ProviderLMStudio:
 		return auth.AuthNone, nil
-	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAnthropic, ProviderXAI, ProviderGoogle:
+	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAnthropic, ProviderXAI, ProviderGoogle:
 		return auth.AuthAPIKey, nil
 	case ProviderBedrock:
 		// Bedrock authenticates with AWS SigV4, not a bearer API key; a generic auto

@@ -30,6 +30,7 @@ import (
 
 	"github.com/looprig/llm"
 	anthropicprovider "github.com/looprig/llm/providers/anthropic"
+	azureprovider "github.com/looprig/llm/providers/azure"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
 	openaiprovider "github.com/looprig/llm/providers/openai"
@@ -147,6 +148,8 @@ func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Clien
 		return genericHTTP(selected, auth.Key(key))
 	case llm.ProviderOpenAI:
 		return openaiprovider.New(selected, key)
+	case llm.ProviderAzure:
+		return azureprovider.New(selected, key)
 	case llm.ProviderAnthropic:
 		return anthropicprovider.New(selected, key)
 	case llm.ProviderXAI:

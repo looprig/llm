@@ -82,7 +82,7 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 			Reason:    llm.CounterSupportAPIFormatUnavailable,
 			APIFormat: apiFormat,
 		}
-	case llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio:
+	case llm.ProviderAzure, llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio:
 		return nil, &llm.CounterSupportError{
 			Provider:  provider,
 			Reason:    llm.CounterSupportExactUnavailable,
