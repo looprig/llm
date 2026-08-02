@@ -3,10 +3,21 @@ package gitlab
 import (
 	"fmt"
 
+	model "github.com/looprig/inference/model"
 	"github.com/looprig/llm"
 )
 
 type CounterSupportError = llm.CounterSupportError
+
+type ModelMappingError struct {
+	Alias  string
+	Format model.APIFormat
+	Reason string
+}
+
+func (e *ModelMappingError) Error() string {
+	return "gitlab: model mapping for " + e.Alias + " (" + string(e.Format) + "): " + e.Reason
+}
 
 type DirectAccessError struct {
 	Status int

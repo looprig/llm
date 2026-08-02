@@ -9,18 +9,25 @@ import (
 type ConfigurationReason string
 
 const (
-	ServiceKeyMissing ConfigurationReason = "service key is missing"
-	InvalidServiceKey ConfigurationReason = "service key is invalid"
-	DeploymentMissing ConfigurationReason = "no running orchestration deployment was found"
+	ServiceKeyMissing  ConfigurationReason = "service key is missing"
+	InvalidServiceKey  ConfigurationReason = "service key is invalid"
+	InvalidModelParams ConfigurationReason = "model parameters are invalid"
+	DeploymentMissing  ConfigurationReason = "no running orchestration deployment was found"
 )
 
 type ConfigurationError struct {
 	Reason ConfigurationReason
+	Err    error
 }
 
 func (e *ConfigurationError) Error() string {
+	if e.Err != nil {
+		return "sap-ai-core: configuration: " + string(e.Reason) + ": " + e.Err.Error()
+	}
 	return "sap-ai-core: configuration: " + string(e.Reason)
 }
+
+func (e *ConfigurationError) Unwrap() error { return e.Err }
 
 type AuthError struct {
 	Status int

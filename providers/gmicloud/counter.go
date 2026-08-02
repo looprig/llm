@@ -9,5 +9,5 @@ import (
 )
 
 func NewCounter(_ auth.APIKey) (contextcount.ContextCounter, error) {
-	return simple.NewAnthropicCounter(llm.ProviderGMICloud)
+	return simple.NewCounter(llm.ProviderGMICloud)
 }

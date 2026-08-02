@@ -24,7 +24,6 @@ type directAccessResponse struct {
 type directAccessAuthenticator struct {
 	key          auth.APIKey
 	instanceURL  string
-	gatewayURL   string
 	featureFlags map[string]bool
 	client       *http.Client
 
@@ -33,7 +32,7 @@ type directAccessAuthenticator struct {
 	expiresAt time.Time
 }
 
-func newDirectAccessAuthenticator(key auth.APIKey, instanceURL, gatewayURL string, featureFlags map[string]bool) auth.Authenticator {
+func newDirectAccessAuthenticator(key auth.APIKey, instanceURL string, featureFlags map[string]bool) *directAccessAuthenticator {
 	flags := make(map[string]bool, len(featureFlags))
 	for name, enabled := range featureFlags {
 		flags[name] = enabled
@@ -41,10 +40,16 @@ func newDirectAccessAuthenticator(key auth.APIKey, instanceURL, gatewayURL strin
 	return &directAccessAuthenticator{
 		key:          key,
 		instanceURL:  strings.TrimRight(instanceURL, "/"),
-		gatewayURL:   strings.TrimRight(gatewayURL, "/"),
 		featureFlags: flags,
 		client:       &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (a *directAccessAuthenticator) invalidate() {
+	a.mu.Lock()
+	a.token = directAccessResponse{}
+	a.expiresAt = time.Time{}
+	a.mu.Unlock()
 }
 
 func (a *directAccessAuthenticator) Authorize(ctx context.Context, request *http.Request) error {

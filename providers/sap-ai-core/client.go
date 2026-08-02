@@ -5,6 +5,7 @@
 package sap
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -68,10 +69,12 @@ func (k ServiceKey) validate() error {
 type Option func(*config)
 
 type config struct {
-	deploymentURL string
-	deploymentID  string
-	resourceGroup string
-	headers       http.Header
+	deploymentURL  string
+	deploymentID   string
+	resourceGroup  string
+	headers        http.Header
+	modelParams    map[string]json.RawMessage
+	modelParamsErr error
 }
 
 // WithDeploymentURL bypasses deployment discovery and uses the already-known
@@ -100,6 +103,35 @@ func WithHeader(name, value string) Option {
 	}
 }
 
+// WithModelParams merges documented SAP Harmonized API model parameters into
+// the /v2/chat request. Keys are forwarded verbatim in snake_case so SAP can
+// apply model-specific parameters outside the shared inference fields.
+func WithModelParams(params map[string]any) Option {
+	return func(c *config) {
+		if c.modelParams == nil {
+			c.modelParams = make(map[string]json.RawMessage)
+		}
+		for name, value := range params {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				c.modelParamsErr = errors.New("model parameter name is empty")
+				continue
+			}
+			raw, err := json.Marshal(value)
+			if err != nil {
+				c.modelParamsErr = err
+				continue
+			}
+			c.modelParams[name] = raw
+		}
+	}
+}
+
+// WithModelParam adds one SAP Harmonized API model parameter.
+func WithModelParam(name string, value any) Option {
+	return WithModelParams(map[string]any{name: value})
+}
+
 // New constructs an SAP AI Core client. If Model.BaseURL or WithDeploymentURL
 // is absent, the first request discovers a running orchestration deployment
 // through the service key's AI_API_URL; construction itself performs no I/O.
@@ -118,6 +150,9 @@ func New(selected model.Model, serviceKey ServiceKey, options ...Option) (infere
 		if option != nil {
 			option(&cfg)
 		}
+	}
+	if cfg.modelParamsErr != nil {
+		return nil, &ConfigurationError{Reason: InvalidModelParams, Err: cfg.modelParamsErr}
 	}
 	if cfg.deploymentID == "" {
 		cfg.deploymentID = strings.TrimSpace(os.Getenv(deploymentIDEnvironment))
@@ -142,6 +177,7 @@ func New(selected model.Model, serviceKey ServiceKey, options ...Option) (infere
 		deploymentID:  cfg.deploymentID,
 		resourceGroup: cfg.resourceGroup,
 		headers:       cfg.headers.Clone(),
+		modelParams:   cloneRawFields(cfg.modelParams),
 		auth:          newServiceKeyAuthenticator(serviceKey),
 	}
 	if client.deploymentURL != "" {
@@ -168,16 +204,16 @@ func NewFromEnvironment(selected model.Model, options ...Option) (inference.Clie
 // encoding, decoding, SSE, usage, tools, and errors to the shared OpenAI codec
 // and transport.
 type Client struct {
-	selected       model.Model
-	serviceKey     ServiceKey
-	deploymentURL  string
-	deploymentID   string
-	resourceGroup  string
-	headers        http.Header
-	auth           *serviceKeyAuthenticator
-	mu             sync.Mutex
-	inner          inference.Client
-	resolveFailure error
+	selected      model.Model
+	serviceKey    ServiceKey
+	deploymentURL string
+	deploymentID  string
+	resourceGroup string
+	headers       http.Header
+	modelParams   map[string]json.RawMessage
+	auth          *serviceKeyAuthenticator
+	mu            sync.Mutex
+	inner         inference.Client
 }
 
 var _ inference.Client = (*Client)(nil)
@@ -204,12 +240,8 @@ func (c *Client) ensure(ctx context.Context) (inference.Client, error) {
 	if c.inner != nil {
 		return c.inner, nil
 	}
-	if c.resolveFailure != nil {
-		return nil, c.resolveFailure
-	}
 	deploymentURL, err := c.resolveDeployment(ctx)
 	if err != nil {
-		c.resolveFailure = err
 		return nil, err
 	}
 	c.deploymentURL = deploymentURL
@@ -226,9 +258,58 @@ func (c *Client) buildInner(deploymentURL string) inference.Client {
 	return transport.New(
 		transport.Endpoint{BaseURL: strings.TrimRight(deploymentURL, "/"), Provider: selectedProvider(c.selected), APIFormat: model.APIFormatOpenAI},
 		headerRoute{headers: headers},
-		openaiapi.Codec{},
+		modelParamsCodec{base: openaiapi.Codec{}, params: c.modelParams},
 		c.auth,
 	)
+}
+
+func cloneRawFields(fields map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(fields) == 0 {
+		return nil
+	}
+	clone := make(map[string]json.RawMessage, len(fields))
+	for name, value := range fields {
+		clone[name] = append(json.RawMessage(nil), value...)
+	}
+	return clone
+}
+
+type modelParamsCodec struct {
+	base   codec.StreamingCodec
+	params map[string]json.RawMessage
+}
+
+var _ codec.StreamingCodec = modelParamsCodec{}
+
+func (c modelParamsCodec) EncodeRequest(req inference.Request, mode codec.RequestMode) (codec.EncodedRequest, error) {
+	encoded, err := c.base.EncodeRequest(req, mode)
+	if err != nil || len(c.params) == 0 {
+		return encoded, err
+	}
+	raw, err := io.ReadAll(encoded.Body)
+	if err != nil {
+		return codec.EncodedRequest{}, err
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return codec.EncodedRequest{}, err
+	}
+	for name, value := range c.params {
+		body[name] = append(json.RawMessage(nil), value...)
+	}
+	patched, err := json.Marshal(body)
+	if err != nil {
+		return codec.EncodedRequest{}, err
+	}
+	return codec.EncodedRequest{Header: encoded.Header.Clone(), Body: bytes.NewReader(patched)}, nil
+}
+
+func (c modelParamsCodec) DecodeResponse(body []byte) (*inference.Response, error) {
+	return c.base.DecodeResponse(body)
+}
+
+func (c modelParamsCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
+	return c.base.DecodeStream(resp)
 }
 
 func selectedProvider(selected model.Model) model.ProviderName {

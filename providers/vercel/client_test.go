@@ -9,10 +9,14 @@ import (
 
 	"github.com/looprig/llm"
 	"github.com/looprig/llm/providers/internal/contracttest"
+	"github.com/looprig/llm/providers/internal/simple"
 	"github.com/looprig/llm/providers/vercel"
 )
 
 func TestContracts(t *testing.T) {
+	contracttest.NoDefaultOpenCodeAttribution(t, llm.ProviderVercel, "vercel-key", "http-referer", func(selected model.Model, key auth.APIKey, options ...simple.Option) (inference.Client, error) {
+		return vercel.New(selected, key, options...)
+	})
 	contracttest.OpenAI(t, llm.ProviderVercel, "vercel-key", func(selected model.Model, key auth.APIKey) (inference.Client, error) {
 		return vercel.New(selected, key)
 	})

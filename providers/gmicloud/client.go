@@ -1,4 +1,5 @@
-// Package gmicloud provides GMI Cloud's native Anthropic Messages endpoint.
+// Package gmicloud provides GMI Cloud's documented OpenAI-compatible Chat
+// Completions API.
 package gmicloud
 
 import (
@@ -15,13 +16,10 @@ const DefaultBaseURL = "https://api.gmi-serving.com/v1"
 type Option = simple.Option
 
 func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Client, error) {
-	defaults := []Option{simple.WithHeader("anthropic-version", "2023-06-01")}
-	defaults = append(defaults, options...)
 	return simple.New(selected, key, simple.Definition{
 		Provider:       llm.ProviderGMICloud,
 		DefaultBaseURL: DefaultBaseURL,
-		DefaultPath:    "/messages",
+		DefaultPath:    "/chat/completions",
 		Authentication: auth.AuthAPIKey,
-		KeyHeader:      "x-api-key",
-	}, defaults...)
+	}, options...)
 }

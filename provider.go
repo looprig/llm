@@ -13,12 +13,12 @@ import (
 // RequiredAuth (which is the real gate and can express non-key auth like SigV4).
 func (p Provider) RequiresKey() (bool, error) {
 	switch p {
-	case ProviderLMStudio, ProviderAtomicChat, ProviderLlama, ProviderOllama:
+	case ProviderLMStudio, ProviderAtomicChat, ProviderLlamaCPP, ProviderOllama:
 		return false, nil
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAzureCognitiveServices, ProviderAnthropic, ProviderXAI, ProviderGoogle,
 		Provider302AI, ProviderBaseten, ProviderCerebras, ProviderCloudflareAIGateway, ProviderCloudflareWorkersAI,
 		ProviderCortecs, ProviderDeepSeek, ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
-		ProviderGMICloud, ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderIONet, ProviderMoonshot,
+		ProviderGMICloud, ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderIONet, ProviderMoonshot,
 		ProviderMiniMax, ProviderNVIDIA, ProviderNebius, ProviderOllamaCloud, ProviderOpenCode, ProviderOpenCodeGo,
 		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
@@ -41,7 +41,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 	switch p {
 	case ProviderPhala, ProviderChutes, ProviderOpenRouter, Provider302AI, ProviderAtomicChat, ProviderBaseten, ProviderCerebras,
 		ProviderCloudflareWorkersAI, ProviderCortecs, ProviderDeepSeek, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
-		ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderIONet, ProviderMoonshot, ProviderNVIDIA,
+		ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderLlamaCPP, ProviderIONet, ProviderMoonshot, ProviderNVIDIA,
 		ProviderNebius, ProviderOllama, ProviderOllamaCloud, ProviderSTACKIT, ProviderOVHCloud,
 		ProviderScaleway, ProviderTogetherAI, ProviderZAI:
 		return f == model.APIFormatOpenAI
@@ -53,8 +53,10 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
 	case ProviderVercel:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
-	case ProviderAnthropic, ProviderMiniMax, ProviderGMICloud:
+	case ProviderAnthropic, ProviderMiniMax:
 		return f == model.APIFormatAnthropic
+	case ProviderGMICloud:
+		return f == model.APIFormatOpenAI
 	case ProviderAzureCognitiveServices:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses || f == model.APIFormatAnthropic
 	case ProviderCloudflareAIGateway:
@@ -101,7 +103,7 @@ func (p Provider) allowsEmptyBaseURL() bool {
 		ProviderCerebras, ProviderCloudflareAIGateway, ProviderCloudflareWorkersAI, ProviderCortecs, ProviderDeepSeek,
 		ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks, ProviderGitLab, ProviderGitHubCopilot,
 		ProviderGMICloud, ProviderGoogleVertex, ProviderGoogleVertexAnthropic, ProviderGroq, ProviderHuggingFace,
-		ProviderHelicone, ProviderLlama, ProviderIONet, ProviderMoonshot, ProviderMiniMax, ProviderNVIDIA, ProviderNebius,
+		ProviderHelicone, ProviderLlama, ProviderLlamaCPP, ProviderIONet, ProviderMoonshot, ProviderMiniMax, ProviderNVIDIA, ProviderNebius,
 		ProviderOllama, ProviderOllamaCloud, ProviderOpenCode, ProviderOpenCodeGo, ProviderLLMGateway, ProviderSAP,
 		ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSnowflakeCortex, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
@@ -116,9 +118,9 @@ func (p Provider) allowsEmptyBaseURL() bool {
 // RequiresKey; fail-closed by the same rationale (a permissive default would fail open).
 func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 	switch p {
-	case ProviderLMStudio, ProviderAtomicChat, ProviderLlama, ProviderOllama:
+	case ProviderLMStudio, ProviderAtomicChat, ProviderLlamaCPP, ProviderOllama:
 		return auth.AuthNone, nil
-	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAzureCognitiveServices, ProviderAnthropic, ProviderXAI, ProviderGoogle,
+	case ProviderPhala, ProviderChutes, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAzureCognitiveServices, ProviderAnthropic, ProviderXAI, ProviderGoogle, ProviderLlama,
 		Provider302AI, ProviderBaseten, ProviderCerebras, ProviderCloudflareAIGateway, ProviderCloudflareWorkersAI,
 		ProviderCortecs, ProviderDeepSeek, ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
 		ProviderGMICloud, ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderIONet, ProviderMoonshot,
