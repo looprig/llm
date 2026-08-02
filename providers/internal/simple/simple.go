@@ -24,6 +24,10 @@ func NewCounter(provider llm.Provider) (contextcount.ContextCounter, error) {
 	return compat.UnsupportedCounter(provider, model.APIFormatOpenAI)
 }
 
+func NewAnthropicCounter(provider llm.Provider) (contextcount.ContextCounter, error) {
+	return compat.UnsupportedCounter(provider, model.APIFormatAnthropic)
+}
+
 func WithHeader(name, value string) Option { return compat.WithHeader(name, value) }
 
 func WithReasoningEffort(value string) Option {
@@ -43,6 +47,17 @@ func WithThinking(enabled bool) Option {
 		t = "enabled"
 	}
 	return compat.WithBodyField("thinking", thinking{Type: t})
+}
+
+func WithThinkingBudget(budget int) Option {
+	return compat.WithBodyField("thinking", map[string]any{
+		"type":          "enabled",
+		"budget_tokens": budget,
+	})
+}
+
+func WithThinkingEnabled(enabled bool) Option {
+	return compat.WithBodyField("thinking", map[string]bool{"enabled": enabled})
 }
 
 func WithServiceTier(value string) Option {
