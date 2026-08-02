@@ -24,6 +24,9 @@ const (
 	eventReasoningSummaryDelta = "response.reasoning_summary.delta"
 
 	contentTypeReasoningText = "reasoning_text"
+	itemTypeMessage          = "message"
+	itemTypeReasoning        = "reasoning"
+	summaryTypeText          = "summary_text"
 	incompleteReasonFilter   = "content_filter"
 )
 
@@ -63,6 +66,10 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 		body["reasoning"], err = json.Marshal(c.config.reasoning)
 		if err != nil {
 			return codec.EncodedRequest{}, fmt.Errorf("azure: encode reasoning option: %w", err)
+		}
+		body["include"], err = addInclude(body["include"], "reasoning.encrypted_content")
+		if err != nil {
+			return codec.EncodedRequest{}, fmt.Errorf("azure: encode reasoning include: %w", err)
 		}
 	}
 	if c.config.metadata != nil {
@@ -134,8 +141,9 @@ func normalizeResponseBody(body []byte) ([]byte, responseMetadata, error) {
 		return nil, responseMetadata{}, err
 	}
 
+	var normalizedOutput []json.RawMessage
 	changed := false
-	for index, rawItem := range output {
+	for _, rawItem := range output {
 		var item map[string]json.RawMessage
 		if err := json.Unmarshal(rawItem, &item); err != nil {
 			return nil, responseMetadata{}, err
@@ -146,55 +154,35 @@ func normalizeResponseBody(body []byte) ([]byte, responseMetadata, error) {
 				return nil, responseMetadata{}, err
 			}
 		}
-		if itemType != "reasoning" {
-			continue
-		}
-
-		var contentParts []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if rawContent, exists := item["content"]; exists && string(rawContent) != "null" {
-			if err := json.Unmarshal(rawContent, &contentParts); err != nil {
-				return nil, responseMetadata{}, err
-			}
-		}
-
-		var summary []json.RawMessage
-		if rawSummary, exists := item["summary"]; exists && string(rawSummary) != "null" {
-			if err := json.Unmarshal(rawSummary, &summary); err != nil {
-				return nil, responseMetadata{}, err
-			}
-		}
-		itemChanged := false
-		for _, part := range contentParts {
-			if part.Type != contentTypeReasoningText || part.Text == "" {
-				continue
-			}
-			encoded, err := json.Marshal(map[string]string{"type": "summary_text", "text": part.Text})
+		switch itemType {
+		case itemTypeReasoning:
+			itemChanged, err := appendReasoningTextToSummary(item)
 			if err != nil {
 				return nil, responseMetadata{}, err
 			}
-			summary = append(summary, encoded)
-			itemChanged = true
-			changed = true
-		}
-		if itemChanged {
-			encoded, err := json.Marshal(summary)
+			if itemChanged {
+				rawItem, err = json.Marshal(item)
+				if err != nil {
+					return nil, responseMetadata{}, err
+				}
+				changed = true
+			}
+			normalizedOutput = append(normalizedOutput, rawItem)
+		case itemTypeMessage:
+			items, itemChanged, err := splitMessageReasoning(item)
 			if err != nil {
 				return nil, responseMetadata{}, err
 			}
-			item["summary"] = encoded
-			output[index], err = json.Marshal(item)
-			if err != nil {
-				return nil, responseMetadata{}, err
-			}
+			normalizedOutput = append(normalizedOutput, items...)
+			changed = changed || itemChanged
+		default:
+			normalizedOutput = append(normalizedOutput, rawItem)
 		}
 	}
 	if !changed {
 		return body, metadata, nil
 	}
-	encodedOutput, err := json.Marshal(output)
+	encodedOutput, err := json.Marshal(normalizedOutput)
 	if err != nil {
 		return nil, responseMetadata{}, err
 	}
@@ -204,6 +192,158 @@ func normalizeResponseBody(body []byte) ([]byte, responseMetadata, error) {
 		return nil, responseMetadata{}, err
 	}
 	return normalized, metadata, nil
+}
+
+type reasoningTextPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func appendReasoningTextToSummary(item map[string]json.RawMessage) (bool, error) {
+	contentParts, err := reasoningTextParts(item)
+	if err != nil {
+		return false, err
+	}
+	var summary []json.RawMessage
+	if rawSummary, exists := item["summary"]; exists && string(rawSummary) != "null" {
+		if err := json.Unmarshal(rawSummary, &summary); err != nil {
+			return false, err
+		}
+	}
+	changed := false
+	for _, part := range contentParts {
+		if part.Type != contentTypeReasoningText || part.Text == "" {
+			continue
+		}
+		encoded, err := json.Marshal(map[string]string{"type": summaryTypeText, "text": part.Text})
+		if err != nil {
+			return false, err
+		}
+		summary = append(summary, encoded)
+		changed = true
+	}
+	if changed {
+		item["summary"], err = json.Marshal(summary)
+		if err != nil {
+			return false, err
+		}
+	}
+	return changed, nil
+}
+
+func splitMessageReasoning(item map[string]json.RawMessage) ([]json.RawMessage, bool, error) {
+	contentParts, err := reasoningTextParts(item)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(contentParts) == 0 {
+		raw, err := json.Marshal(item)
+		return []json.RawMessage{raw}, false, err
+	}
+
+	var normalized []json.RawMessage
+	var pending []json.RawMessage
+	changed := false
+	flushMessage := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		message := cloneRawObject(item)
+		var err error
+		message["content"], err = json.Marshal(pending)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return err
+		}
+		normalized = append(normalized, raw)
+		pending = nil
+		return nil
+	}
+	rawParts, err := rawContentParts(item)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, rawPart := range rawParts {
+		var part reasoningTextPart
+		if err := json.Unmarshal(rawPart, &part); err != nil {
+			return nil, false, err
+		}
+		if part.Type != contentTypeReasoningText || part.Text == "" {
+			pending = append(pending, rawPart)
+			continue
+		}
+		if err := flushMessage(); err != nil {
+			return nil, false, err
+		}
+		reasoning, err := json.Marshal(map[string]any{
+			"type":    itemTypeReasoning,
+			"summary": []map[string]string{{"type": summaryTypeText, "text": part.Text}},
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		normalized = append(normalized, reasoning)
+		changed = true
+	}
+	if err := flushMessage(); err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		raw, err := json.Marshal(item)
+		return []json.RawMessage{raw}, false, err
+	}
+	return normalized, true, nil
+}
+
+func reasoningTextParts(item map[string]json.RawMessage) ([]reasoningTextPart, error) {
+	rawContent, exists := item["content"]
+	if !exists || string(rawContent) == "null" {
+		return nil, nil
+	}
+	var parts []reasoningTextPart
+	if err := json.Unmarshal(rawContent, &parts); err != nil {
+		return nil, err
+	}
+	return parts, nil
+}
+
+func rawContentParts(item map[string]json.RawMessage) ([]json.RawMessage, error) {
+	rawContent, exists := item["content"]
+	if !exists || string(rawContent) == "null" {
+		return nil, nil
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(rawContent, &parts); err != nil {
+		return nil, err
+	}
+	return parts, nil
+}
+
+func cloneRawObject(item map[string]json.RawMessage) map[string]json.RawMessage {
+	clone := make(map[string]json.RawMessage, len(item))
+	for key, value := range item {
+		clone[key] = value
+	}
+	return clone
+}
+
+func addInclude(raw json.RawMessage, want string) (json.RawMessage, error) {
+	var include []string
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &include); err != nil {
+			return nil, err
+		}
+	}
+	for _, value := range include {
+		if value == want {
+			return raw, nil
+		}
+	}
+	include = append(include, want)
+	return json.Marshal(include)
 }
 
 type streamEvent struct {

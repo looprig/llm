@@ -66,7 +66,6 @@ func TestNewInvokeUsesAzureResponsesAndAPIKey(t *testing.T) {
 		srv.URL+"/openai/v1",
 		"gpt-4.1",
 		model.WithTools(),
-		model.WithThinking(),
 		model.WithStructuredOutputWithTools(),
 		model.WithSampling(model.Sampling{Effort: model.EffortMedium, MaxTokens: intPtr(128)}),
 	)
@@ -157,6 +156,11 @@ func TestNewInvokeUsesAzureResponsesAndAPIKey(t *testing.T) {
 	if promptCacheKey != "conversation-1" {
 		t.Errorf("prompt_cache_key = %q, want conversation-1", promptCacheKey)
 	}
+	var include []string
+	decodeField(t, body, "include", &include)
+	if !contains(include, "reasoning.encrypted_content") {
+		t.Errorf("include = %#v, want encrypted reasoning content", include)
+	}
 }
 
 func TestInvokeNormalizesAzureReasoningTextAndContentFilter(t *testing.T) {
@@ -169,7 +173,7 @@ func TestInvokeNormalizesAzureReasoningTextAndContentFilter(t *testing.T) {
 			"model":"gpt-4.1",
 			"output":[
 				{"type":"reasoning","content":[{"type":"reasoning_text","text":"direct thought"}]},
-				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"filtered answer"}]}
+				{"type":"message","role":"assistant","content":[{"type":"reasoning_text","text":"message thought"},{"type":"output_text","text":"filtered answer"}]}
 			],
 			"incomplete_details":{"reason":"content_filter"},
 			"usage":{"input_tokens":5,"output_tokens":2}
@@ -189,11 +193,17 @@ func TestInvokeNormalizesAzureReasoningTextAndContentFilter(t *testing.T) {
 	if resp.FinishReason != stream.FinishReasonContentFilter {
 		t.Fatalf("FinishReason = %v, want content_filter", resp.FinishReason)
 	}
-	if len(resp.Message.Blocks) != 2 {
-		t.Fatalf("decoded blocks = %d, want reasoning/text", len(resp.Message.Blocks))
+	if len(resp.Message.Blocks) != 3 {
+		t.Fatalf("decoded blocks = %d, want two reasoning blocks/text", len(resp.Message.Blocks))
 	}
 	if thinking, ok := resp.Message.Blocks[0].(*content.ThinkingBlock); !ok || thinking.Thinking != "direct thought" {
 		t.Errorf("reasoning block = %#v, want direct reasoning text", resp.Message.Blocks[0])
+	}
+	if thinking, ok := resp.Message.Blocks[1].(*content.ThinkingBlock); !ok || thinking.Thinking != "message thought" {
+		t.Errorf("message reasoning block = %#v, want direct reasoning text", resp.Message.Blocks[1])
+	}
+	if text, ok := resp.Message.Blocks[2].(*content.TextBlock); !ok || text.Text != "filtered answer" {
+		t.Errorf("text block = %#v, want filtered answer", resp.Message.Blocks[2])
 	}
 }
 
@@ -390,6 +400,15 @@ func decodeField(t *testing.T, body map[string]json.RawMessage, key string, out 
 	if err := json.Unmarshal(raw, out); err != nil {
 		t.Fatalf("decode %q: %v", key, err)
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func intPtr(value int) *int { return &value }
