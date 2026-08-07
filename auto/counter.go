@@ -91,7 +91,7 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 		llm.ProviderLlama, llm.ProviderLlamaCPP, llm.ProviderIONet, llm.ProviderMoonshot, llm.ProviderMiniMax, llm.ProviderNVIDIA,
 		llm.ProviderNebius, llm.ProviderOllama, llm.ProviderOllamaCloud, llm.ProviderOpenCode, llm.ProviderOpenCodeGo,
 		llm.ProviderLLMGateway, llm.ProviderSAP, llm.ProviderSTACKIT, llm.ProviderOVHCloud, llm.ProviderScaleway,
-		llm.ProviderSnowflakeCortex, llm.ProviderTogetherAI, llm.ProviderVenice, llm.ProviderVercel, llm.ProviderZAI,
+		llm.ProviderSnowflakeCortex, llm.ProviderSynthetic, llm.ProviderTogetherAI, llm.ProviderVenice, llm.ProviderVercel, llm.ProviderZAI,
 		llm.ProviderZenMux:
 		return nil, &llm.CounterSupportError{
 			Provider:  provider,

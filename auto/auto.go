@@ -72,6 +72,7 @@ import (
 	scalewayprovider "github.com/looprig/llm/providers/scaleway"
 	snowflakeprovider "github.com/looprig/llm/providers/snowflake-cortex"
 	stackitprovider "github.com/looprig/llm/providers/stackit"
+	syntheticprovider "github.com/looprig/llm/providers/synthetic"
 	togetherprovider "github.com/looprig/llm/providers/together"
 	veniceprovider "github.com/looprig/llm/providers/venice"
 	vercelprovider "github.com/looprig/llm/providers/vercel"
@@ -300,6 +301,8 @@ func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Clien
 		return scalewayprovider.New(selected, key)
 	case llm.ProviderSnowflakeCortex:
 		return snowflakeprovider.New(selected, key)
+	case llm.ProviderSynthetic:
+		return syntheticprovider.New(selected, key)
 	case llm.ProviderTogetherAI:
 		return togetherprovider.New(selected, key)
 	case llm.ProviderVenice:

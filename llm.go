@@ -62,6 +62,7 @@ const (
 	ProviderOVHCloud               Provider = "ovhcloud"
 	ProviderScaleway               Provider = "scaleway"
 	ProviderSnowflakeCortex        Provider = "snowflake-cortex"
+	ProviderSynthetic              Provider = "synthetics"
 	ProviderTogetherAI             Provider = "togetherai"
 	ProviderVenice                 Provider = "venice"
 	ProviderVercel                 Provider = "vercel"

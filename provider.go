@@ -20,7 +20,7 @@ func (p Provider) RequiresKey() (bool, error) {
 		ProviderCortecs, ProviderDeepSeek, ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
 		ProviderGMICloud, ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderIONet, ProviderMoonshot,
 		ProviderMiniMax, ProviderNVIDIA, ProviderNebius, ProviderOllamaCloud, ProviderOpenCode, ProviderOpenCodeGo,
-		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderTogetherAI, ProviderVenice,
+		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSynthetic, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
 		return true, nil
 	case ProviderGitLab, ProviderGitHubCopilot, ProviderGoogleVertex, ProviderGoogleVertexAnthropic, ProviderSAP, ProviderSnowflakeCortex:
@@ -43,7 +43,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 		ProviderCloudflareWorkersAI, ProviderCortecs, ProviderDeepSeek, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
 		ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderLlama, ProviderLlamaCPP, ProviderIONet, ProviderMoonshot, ProviderNVIDIA,
 		ProviderNebius, ProviderOllama, ProviderOllamaCloud, ProviderSTACKIT, ProviderOVHCloud,
-		ProviderScaleway, ProviderTogetherAI, ProviderZAI:
+		ProviderScaleway, ProviderSynthetic, ProviderTogetherAI, ProviderZAI:
 		return f == model.APIFormatOpenAI
 	case ProviderOpenAI, ProviderXAI:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
@@ -105,7 +105,7 @@ func (p Provider) allowsEmptyBaseURL() bool {
 		ProviderGMICloud, ProviderGoogleVertex, ProviderGoogleVertexAnthropic, ProviderGroq, ProviderHuggingFace,
 		ProviderHelicone, ProviderLlama, ProviderLlamaCPP, ProviderIONet, ProviderMoonshot, ProviderMiniMax, ProviderNVIDIA, ProviderNebius,
 		ProviderOllama, ProviderOllamaCloud, ProviderOpenCode, ProviderOpenCodeGo, ProviderLLMGateway, ProviderSAP,
-		ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSnowflakeCortex, ProviderTogetherAI, ProviderVenice,
+		ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSnowflakeCortex, ProviderSynthetic, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
 		return true
 	default:
@@ -125,7 +125,7 @@ func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 		ProviderCortecs, ProviderDeepSeek, ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks,
 		ProviderGMICloud, ProviderGroq, ProviderHuggingFace, ProviderHelicone, ProviderIONet, ProviderMoonshot,
 		ProviderMiniMax, ProviderNVIDIA, ProviderNebius, ProviderOllamaCloud, ProviderOpenCode, ProviderOpenCodeGo,
-		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderTogetherAI, ProviderVenice,
+		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSynthetic, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
 		return auth.AuthAPIKey, nil
 	case ProviderGitLab, ProviderGitHubCopilot:
