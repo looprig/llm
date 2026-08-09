@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 	nonce, ok := sess.popNonce()
 	if !ok {
 		c.dropSession(chuteID)
-		return nil, &failure.APIError{Status: http.StatusForbidden, Message: "nonce exhausted"}
+		return nil, failure.NewAPIError(http.StatusForbidden, "forbidden", "", 0)
 	}
 
 	mlkemCT, blob, err := e2e.Seal(plaintext, sess.key, []byte("e2e-req-v1"), true)
@@ -71,7 +72,7 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 	ct := httpResp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "text/event-stream") {
 		defer httpResp.Body.Close()
-		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: "expected text/event-stream, got " + ct}
+		return nil, fmt.Errorf("chutes stream: expected text/event-stream, got %s", ct)
 	}
 	return httpResp, nil
 }
@@ -207,7 +208,7 @@ func (c *Client) pump(ctx context.Context, body io.ReadCloser, respDK *mlkem.Dec
 			}
 
 		case ev.Error != nil:
-			closeErr(&failure.APIError{Status: 0, Message: "chutes stream e2e_error: " + string(ev.Error), Body: ev.Error})
+			closeErr(failure.NewAPIError(0, "api_error", "", 0))
 			return
 
 		case ev.Usage != nil:

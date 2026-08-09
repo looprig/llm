@@ -1,5 +1,7 @@
 package openai
 
+import "crypto/x509"
+
 // ReasoningOptions controls OpenAI reasoning. Effort is encoded as the
 // Responses reasoning object or Chat Completions reasoning_effort field,
 // depending on the selected model APIFormat. Summary applies to Responses.
@@ -23,10 +25,18 @@ type config struct {
 	serviceTier    ServiceTier
 	metadata       map[string]string
 	promptCacheKey string
+	tlsRootCAs     *x509.CertPool
 }
 
 // Option customizes an OpenAI client at construction time.
 type Option func(*config)
+
+func WithTLSRootCAs(roots *x509.CertPool) Option {
+	if roots == nil {
+		panic("openai: TLS roots must not be nil")
+	}
+	return func(c *config) { c.tlsRootCAs = roots }
+}
 
 // WithReasoning sets the provider reasoning controls. It replaces any
 // reasoning controls inferred from model sampling so the caller has one

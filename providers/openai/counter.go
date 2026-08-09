@@ -325,7 +325,7 @@ func providerAPIError(response *http.Response) error {
 	if err != nil {
 		return &failure.NetworkError{Err: err}
 	}
-	return &failure.APIError{Status: response.StatusCode, Message: string(body), Body: body}
+	return failure.APIErrorFromResponse(response.StatusCode, body, response.Header, 0)
 }
 
 func canonicalCounterEndpoint(endpoint string) (string, *CounterEndpointError) {

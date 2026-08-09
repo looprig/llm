@@ -323,15 +323,5 @@ func nvidiaSigningKey(ctx context.Context, hc *http.Client, jwksURL, kid string)
 // apiError builds a *failure.APIError from a non-2xx response, best-effort
 // extracting a "detail" message from the FastAPI/NRAS error envelope.
 func apiError(status int, body []byte) error {
-	e := &failure.APIError{Status: status, Body: body}
-	var env struct {
-		Detail string `json:"detail"`
-	}
-	if err := json.Unmarshal(body, &env); err == nil {
-		e.Message = env.Detail
-	}
-	if e.Message == "" {
-		e.Message = fmt.Sprintf("status %d", status)
-	}
-	return e
+	return failure.APIErrorFromResponse(status, body, nil, 0)
 }

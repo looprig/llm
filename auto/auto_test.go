@@ -2,13 +2,19 @@ package auto
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/looprig/credentials"
+	"github.com/looprig/credentials/httpauth"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
 
@@ -18,9 +24,9 @@ import (
 	"github.com/looprig/inference/codec/openaiapi"
 	"github.com/looprig/inference/codec/openairesponses"
 	model "github.com/looprig/inference/model"
-	"github.com/looprig/inference/transport"
 
 	"github.com/looprig/llm"
+	"github.com/looprig/llm/internal/credentialclient"
 	"github.com/looprig/llm/providers/chutes"
 	geminiprovider "github.com/looprig/llm/providers/gemini"
 	"github.com/looprig/llm/providers/openrouter"
@@ -29,6 +35,39 @@ import (
 // The helpers below stand in for the deleted model catalogue: each returns a valid
 // Model (OriginCustom) via model.CustomModel, used purely as a test fixture. They
 // keep the repeated model rows DRY across this file's dispatch tables.
+func testTLSRoots(srv *httptest.Server) *x509.CertPool {
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	return roots
+}
+
+func TestDynamicSupportMatrixIsExplicit(t *testing.T) {
+	want := map[llm.Provider]map[model.APIFormat]struct{}{
+		llm.ProviderOpenAI:     {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
+		llm.ProviderOpenRouter: {model.APIFormatOpenAI: {}},
+		llm.ProviderAnthropic:  {model.APIFormatAnthropic: {}},
+		llm.ProviderLMStudio:   {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
+	}
+	if !reflect.DeepEqual(dynamicSupport, want) {
+		t.Fatalf("dynamic support matrix = %#v, want %#v", dynamicSupport, want)
+	}
+	if dynamicPolicySupported(model.Model{Provider: "future", APIFormat: model.APIFormatOpenAI}) {
+		t.Fatal("unknown provider dynamically supported")
+	}
+}
+
+func TestLegacyLiteralCredentialSourceKeyIsNotConstructionSentinel(t *testing.T) {
+	client, err := New(chutesKimiK2Model(), auth.APIKey("credential-source"))
+	if err != nil {
+		t.Fatalf("New() with literal key returned error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("New() with literal key returned nil client")
+	}
+	if _, ok := client.(*credentialclient.Client); ok {
+		t.Fatal("unsupported legacy provider was incorrectly wrapped as dynamic credential client")
+	}
+}
 func chutesKimiK2Model() model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderChutes), model.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", model.WithContextLimits(model.ContextLimits{WindowTokens: 128_000}), model.WithTools(), model.WithThinking())
 }
@@ -257,11 +296,10 @@ func TestNewPhalaNotConstructible(t *testing.T) {
 	}
 }
 
-// TestNewConcreteTypes pins each provider to its concrete client so the wiring
-// cannot silently regress to a different implementation. Behavior differs by
-// provider (chutes runs its own e2e client, lmstudio is the generic transport
-// client, google is the bespoke gemini client), so the concrete type is the
-// observable contract.
+// TestNewConcreteTypes pins bespoke legacy providers to their concrete client
+// and verifies transport-backed providers pass through the credential adapter.
+// The adapter is now the observable compatibility boundary for clients that
+// support additive call-scoped authorization methods.
 func TestNewConcreteTypes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -280,14 +318,14 @@ func TestNewConcreteTypes(t *testing.T) {
 		{
 			name:  "lmstudio wires the generic transport client",
 			model: lmStudioLocalModel("qwen"), key: "",
-			is:   func(l inference.Client) bool { _, ok := l.(*transport.Client); return ok },
-			want: "*transport.Client",
+			is:   func(l inference.Client) bool { _, ok := l.(*credentialclient.Client); return ok },
+			want: "*credentialclient.Client",
 		},
 		{
 			name:  "openrouter wires the generic transport client",
 			model: openRouterModel("x"), key: "sk-or-key",
-			is:   func(l inference.Client) bool { _, ok := l.(*transport.Client); return ok },
-			want: "*transport.Client",
+			is:   func(l inference.Client) bool { _, ok := l.(*credentialclient.Client); return ok },
+			want: "*credentialclient.Client",
 		},
 		{
 			name:  "google wires the bespoke gemini client",
@@ -397,7 +435,7 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 	t.Parallel()
 
 	bodyCh := make(chan []byte, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		bodyCh <- body
 		w.Header().Set("Content-Type", "application/json")
@@ -406,7 +444,7 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 	defer srv.Close()
 
 	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
-	client, err := New(selected, "sk-or-test", WithOpenRouterOptions(openrouter.WithUsage(false)))
+	client, err := New(selected, "sk-or-test", WithTLSRootCAs(testTLSRoots(srv)), WithOpenRouterOptions(openrouter.WithUsage(false)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -428,6 +466,187 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 		t.Error("usage.include = true, want explicit false")
 	}
 }
+
+func TestNewWithOpenRouterDelegatesStaticAPIKey(t *testing.T) {
+	t.Parallel()
+
+	requestHeaders := make(chan http.Header, 1)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHeaders <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"response-id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
+	client, err := New(selected, "sk-or-static", WithTLSRootCAs(testTLSRoots(srv)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if got := (<-requestHeaders).Get("Authorization"); got != "Bearer sk-or-static" {
+		t.Fatalf("Authorization = %q, want static API key delegation", got)
+	}
+}
+
+func TestNewWithAuthUsesLeaseAuthorizer(t *testing.T) {
+	t.Parallel()
+
+	requestHeaders := make(chan http.Header, 1)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHeaders <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"response-id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenAI), model.APIFormatOpenAI, srv.URL, "model")
+	policy, err := llm.AuthPolicyForModel(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := policy.Accepted[0].Descriptor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := credentials.NewGeneration("auto-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &testSource{descriptor: descriptor, lease: testLease{
+		descriptor: descriptor,
+		generation: generation,
+		authorizer: auth.Key("lease-key"),
+	}}
+	client, err := NewWithAuth(selected, source, WithTLSRootCAs(testTLSRoots(srv)))
+	if err != nil {
+		t.Fatalf("NewWithAuth() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if got := (<-requestHeaders).Get("Authorization"); got != "Bearer lease-key" {
+		t.Fatalf("Authorization = %q, want lease authorizer", got)
+	}
+}
+
+func TestNewWithAuthRejectsNilAndRemoteNoneSource(t *testing.T) {
+	t.Parallel()
+
+	local := lmStudioLocalModel("local")
+	if client, err := NewWithAuth(local, nil); client != nil || err == nil {
+		t.Fatalf("NewWithAuth(local, nil) = (%T, %v), want construction error", client, err)
+	}
+
+	remote := openAIResponsesModel("remote")
+	remotePolicy, err := llm.AuthPolicyForModel(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteNoneDescriptor, err := credentials.NewDescriptor(
+		remotePolicy.Accepted[0].Provider,
+		remotePolicy.Accepted[0].Transport,
+		credentials.SchemeNone,
+		credentials.UsageLocal,
+		"",
+		"",
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteNone, err := credentials.NewNoneSource(remoteNoneDescriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client, err := NewWithAuth(remote, remoteNone); client != nil || err == nil {
+		t.Fatalf("NewWithAuth(remote, NoneSource) = (%T, %v), want exact-policy mismatch", client, err)
+	}
+}
+
+func TestNewWithAuthAcceptsExplicitLocalNoneSource(t *testing.T) {
+	t.Parallel()
+
+	selected := lmStudioLocalModel("local")
+	policy, err := llm.AuthPolicyForModel(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := policy.Accepted[0].Descriptor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := credentials.NewNoneSource(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewWithAuth(selected, source)
+	if err != nil || client == nil {
+		t.Fatalf("NewWithAuth(local, NoneSource) = (%T, %v), want client", client, err)
+	}
+}
+
+func TestStaticAPIKeyAuthorizerPreservesProviderHeaders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		provider llm.Provider
+		format   model.APIFormat
+		header   string
+	}{
+		{name: "anthropic", provider: llm.ProviderAnthropic, format: model.APIFormatAnthropic, header: "x-api-key"},
+		{name: "azure", provider: llm.ProviderAzure, format: model.APIFormatOpenAIResponses, header: "api-key"},
+		{name: "azure anthropic", provider: llm.ProviderAzureCognitiveServices, format: model.APIFormatAnthropic, header: "x-api-key"},
+		{name: "deepinfra anthropic", provider: llm.ProviderDeepInfra, format: model.APIFormatAnthropic, header: "x-api-key"},
+		{name: "openai", provider: llm.ProviderOpenAI, format: model.APIFormatOpenAI, header: "Authorization"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			requestURL, err := url.Parse("https://provider.example/v1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &http.Request{Method: http.MethodPost, URL: requestURL, Header: make(http.Header)}
+			if err := staticAPIKeyAuthorizer(tt.provider, tt.format, "key").Authorize(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			if got := req.Header.Get(tt.header); got == "" {
+				t.Fatalf("%s header is empty", tt.header)
+			}
+		})
+	}
+}
+
+type testSource struct {
+	descriptor credentials.Descriptor
+	lease      credentials.Lease
+}
+
+func (s *testSource) Reference() credentials.Reference   { return credentials.Reference{} }
+func (s *testSource) Descriptor() credentials.Descriptor { return s.descriptor }
+func (s *testSource) Acquire(context.Context) (credentials.Lease, error) {
+	return s.lease, nil
+}
+func (s *testSource) Invalidate(context.Context, credentials.Generation, credentials.Failure) error {
+	return nil
+}
+func (s *testSource) Close() error { return nil }
+
+type testLease struct {
+	descriptor credentials.Descriptor
+	generation credentials.Generation
+	authorizer httpauth.Authorizer
+}
+
+func (l testLease) Generation() credentials.Generation { return l.generation }
+func (l testLease) Descriptor() credentials.Descriptor { return l.descriptor }
+func (l testLease) ExpiresAt() time.Time               { return time.Time{} }
+func (l testLease) Authorizer() httpauth.Authorizer    { return l.authorizer }
 
 func TestDefaultGenericBaseURL(t *testing.T) {
 	tests := []struct {

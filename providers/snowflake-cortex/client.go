@@ -141,8 +141,11 @@ func isConversationComplete(err error) bool {
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
 		return false
 	}
-	message := strings.ToLower(apiErr.Message + "\n" + string(apiErr.Body))
-	return strings.Contains(message, "conversation complete")
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	if code == "" {
+		code = strings.ToLower(strings.TrimSpace(apiErr.ProviderCode))
+	}
+	return code == "conversation_complete"
 }
 
 func emptyConversationResponse(modelName string) *inference.Response {

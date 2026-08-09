@@ -274,11 +274,7 @@ func (c *Counter) do(req *http.Request) (content.TokenCount, error) {
 		return 0, &failure.NetworkError{Err: err}
 	}
 	if response.StatusCode/100 != 2 {
-		return 0, &failure.APIError{
-			Status:  response.StatusCode,
-			Message: http.StatusText(response.StatusCode),
-			Body:    body,
-		}
+		return 0, failure.APIErrorFromResponse(response.StatusCode, body, response.Header, 0)
 	}
 	if tooLarge {
 		return 0, &CounterResponseError{Reason: CounterResponseBodyTooLarge}

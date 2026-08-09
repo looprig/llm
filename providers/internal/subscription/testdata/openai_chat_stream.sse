@@ -1,0 +1,11 @@
+data: {"choices":[{"delta":{"reasoning_content":"streamed reasoning"}}]}
+
+data: {"choices":[{"delta":{"content":"streamed answer"}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","function":{"name":"lookup","arguments":"{\"value\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"ok\"}"}}]}}]}
+
+data: {"model":"fixture-model","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":6,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":1},"completion_tokens_details":{"reasoning_tokens":2}}}
+
+data: [DONE]

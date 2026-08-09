@@ -4,6 +4,7 @@ package openrouter
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,10 +55,20 @@ type config struct {
 	reasoning       *ReasoningOptions
 	promptCacheKey  string
 	providerRouting *ProviderRoutingOptions
+	tlsRootCAs      *x509.CertPool
 }
 
 // Option customizes an OpenRouter client at construction time.
 type Option func(*config)
+
+// WithTLSRootCAs installs a caller-owned verified certificate pool for tests
+// and controlled clients; nil is rejected rather than silently using defaults.
+func WithTLSRootCAs(roots *x509.CertPool) Option {
+	if roots == nil {
+		panic("openrouter: TLS roots must not be nil")
+	}
+	return func(c *config) { c.tlsRootCAs = roots }
+}
 
 // WithHTTPReferer adds OpenRouter's optional HTTP-Referer attribution header.
 func WithHTTPReferer(value string) Option {
@@ -146,6 +157,10 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		baseURL = defaultBaseURL
 	}
 
+	transportOptions := []transport.Option{}
+	if cfg.tlsRootCAs != nil {
+		transportOptions = append(transportOptions, transport.WithTLSRootCAs(cfg.tlsRootCAs))
+	}
 	return transport.New(
 		transport.Endpoint{
 			BaseURL:   baseURL,
@@ -154,7 +169,7 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		},
 		chatRouter{headers: cfg.headers},
 		requestCodec{config: cfg},
-		auth.Key(key),
+		auth.Key(key), transportOptions...,
 	), nil
 }
 
