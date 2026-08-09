@@ -5,6 +5,12 @@
 package subscription
 
 import (
+	"encoding/hex"
+	"fmt"
+	"io"
+	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/looprig/llm"
@@ -37,7 +43,7 @@ const (
 	EvidenceLegalURL           = "https://code.claude.com/docs/en/legal-and-compliance"
 	EvidenceAgentOverviewURL   = "https://code.claude.com/docs/en/agent-sdk/overview"
 	EvidenceAgentQuickstartURL = "https://code.claude.com/docs/en/agent-sdk/quickstart"
-	EvidencePlanURL            = "https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan"
+	EvidenceThirdPartyUsageURL = "https://support.claude.com/en/articles/13189465-log-in-to-your-claude-account"
 )
 
 const maxEvidenceURLs = 5
@@ -52,6 +58,11 @@ type RegistrationGate struct {
 	evidenceURLs [maxEvidenceURLs]string
 }
 
+var (
+	_ fmt.Formatter  = RegistrationGate{}
+	_ slog.LogValuer = RegistrationGate{}
+)
+
 // AnthropicRegistration returns the current Anthropic subscription
 // registration gate. Every call returns an independent value; its evidence
 // accessor also returns a fresh copy.
@@ -65,7 +76,7 @@ func AnthropicRegistration() RegistrationGate {
 			EvidenceLegalURL,
 			EvidenceAgentOverviewURL,
 			EvidenceAgentQuickstartURL,
-			EvidencePlanURL,
+			EvidenceThirdPartyUsageURL,
 		},
 	}
 }
@@ -96,6 +107,38 @@ func (g RegistrationGate) EvidenceURLs() []string {
 		}
 	}
 	return urls
+}
+
+// Format keeps diagnostics from reflecting private fields. The gate contains
+// only bounded policy metadata today, but this formatter makes that boundary
+// durable if the representation grows later.
+func (g RegistrationGate) Format(state fmt.State, verb rune) {
+	message := g.safeSummary()
+	switch verb {
+	case 'q':
+		_, _ = io.WriteString(state, strconv.Quote(message))
+	case 'x':
+		_, _ = io.WriteString(state, hex.EncodeToString([]byte(message)))
+	case 'X':
+		_, _ = io.WriteString(state, strings.ToUpper(hex.EncodeToString([]byte(message))))
+	default:
+		_, _ = io.WriteString(state, message)
+	}
+}
+
+// LogValue exposes only the safe gate state needed for policy diagnostics;
+// evidence URLs and any future registration fields are intentionally omitted.
+func (g RegistrationGate) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("status", string(g.status)),
+		slog.String("provider", string(g.provider)),
+		slog.String("reviewed_at", g.ReviewedDate()),
+		slog.Int("evidence_count", len(g.EvidenceURLs())),
+	)
+}
+
+func (g RegistrationGate) safeSummary() string {
+	return fmt.Sprintf("anthropic subscription registration gate: status=%s provider=%s reviewed_at=%s evidence_count=%d", g.status, g.provider, g.ReviewedDate(), len(g.EvidenceURLs()))
 }
 
 // Require rejects use of this registration path. A zero-value gate also fails

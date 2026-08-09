@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const unsupportedRegistrationMessage = "anthropic subscription registration unavailable: prior approval/sanctioned registration is absent"
+const unsupportedRegistrationMessage = "anthropic subscription registration unavailable: third-party subscription OAuth is not approved for this client"
 
 // UnsupportedRegistrationError is the redaction-safe, typed failure returned
 // by a blocked subscription registration gate. It intentionally carries no
