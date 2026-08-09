@@ -285,14 +285,20 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	return credentialclient.New(inner, source, policy)
 }
 
+var dynamicSupport = map[llm.Provider]map[model.APIFormat]struct{}{
+	llm.ProviderOpenAI:     {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
+	llm.ProviderOpenRouter: {model.APIFormatOpenAI: {}},
+	llm.ProviderAnthropic:  {model.APIFormatAnthropic: {}},
+	llm.ProviderLMStudio:   {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
+}
+
 func dynamicPolicySupported(selected model.Model) bool {
-	switch llm.Provider(selected.Provider) {
-	case llm.ProviderChutes, llm.ProviderGoogle, llm.ProviderGoogleVertex, llm.ProviderGoogleVertexAnthropic,
-		llm.ProviderSAP, llm.ProviderSnowflakeCortex:
+	formats, ok := dynamicSupport[llm.Provider(selected.Provider)]
+	if !ok {
 		return false
-	default:
-		return true
 	}
+	_, ok = formats[selected.APIFormat]
+	return ok
 }
 
 // constructInner retains the existing provider dispatch and constructor

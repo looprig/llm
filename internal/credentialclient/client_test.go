@@ -72,6 +72,21 @@ func TestClientOriginGuardsConcreteRequestBeforeCredentialAttach(t *testing.T) {
 	}
 }
 
+func TestClientUsesLeaseMatchedBindingForOrigin(t *testing.T) {
+	first := llm.AuthBinding{Provider: "openai", Transport: "chat", Scheme: credentials.SchemeAPIKey, Usage: credentials.UsageMeteredAPI, Issuer: "https://api.openai.com", Audience: "https://api.openai.com"}
+	second := llm.AuthBinding{Provider: "openai", Transport: "responses", Scheme: credentials.SchemeAPIKey, Usage: credentials.UsageMeteredAPI, Issuer: "https://api.openai.com", Audience: "https://proxy.example.test"}
+	policy := llm.AuthPolicy{Accepted: []llm.AuthBinding{first, second}}
+	descriptor := testDescriptor(second)
+	source := &fakeSource{descriptor: descriptor, recoverable: true, leases: []credentials.Lease{fakeLease{descriptor: descriptor, generation: mustGeneration(t, "matched")}}}
+	client, err := New(&originCheckingClient{url: "https://proxy.example.test/v1/chat/completions"}, source, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{}); err != nil {
+		t.Fatalf("matched second binding rejected: %v", err)
+	}
+}
+
 func TestClientInvalidatesAndReacquiresOnceForRefreshableAuthFailure(t *testing.T) {
 	t.Parallel()
 
