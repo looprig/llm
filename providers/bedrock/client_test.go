@@ -202,8 +202,8 @@ func TestBedrockInvokeErrors(t *testing.T) {
 				if apiErr.Status != tt.wantAPICode {
 					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tt.wantAPICode)
 				}
-				if len(apiErr.Body) == 0 {
-					t.Error("APIError.Body is empty, want the raw provider payload")
+				if strings.Contains(err.Error(), "not authorized") || strings.Contains(err.Error(), "boom") {
+					t.Error("API error leaked provider payload")
 				}
 			case tt.wantNetErr:
 				var netErr *failure.NetworkError

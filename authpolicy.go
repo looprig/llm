@@ -2,9 +2,12 @@ package llm
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 
 	"github.com/looprig/credentials"
+	auth "github.com/looprig/inference/auth"
 	model "github.com/looprig/inference/model"
 )
 
@@ -147,13 +150,26 @@ func AuthPolicyForModel(selected model.Model) (AuthPolicy, error) {
 	if err := ValidateModel(selected); err != nil {
 		return AuthPolicy{}, err
 	}
-	return Provider(selected.Provider).AuthPolicy(selected.APIFormat)
+	p := Provider(selected.Provider)
+	origin, err := requestOriginForModel(selected, p.RequiredAuth)
+	if err != nil {
+		return AuthPolicy{}, err
+	}
+	return authPolicyForProviderAtOrigin(p, selected.APIFormat, origin)
 }
 
 // authPolicyForProvider returns the exact policy bridge for a provider/API
 // format pair. It deliberately derives the credential scheme from RequiredAuth
 // so the legacy provider registry remains the single compatibility authority.
 func authPolicyForProvider(p Provider, format model.APIFormat) (AuthPolicy, error) {
+	origin, err := reviewedProviderOrigin(p, format)
+	if err != nil {
+		return AuthPolicy{}, err
+	}
+	return authPolicyForProviderAtOrigin(p, format, origin)
+}
+
+func authPolicyForProviderAtOrigin(p Provider, format model.APIFormat, origin string) (AuthPolicy, error) {
 	if !p.supportsAPIFormat(format) {
 		return AuthPolicy{}, &InvalidAuthPolicyError{Reason: fmt.Sprintf("provider %q does not support API format %q", p, format)}
 	}
@@ -165,7 +181,7 @@ func authPolicyForProvider(p Provider, format model.APIFormat) (AuthPolicy, erro
 		Provider:  string(p),
 		Transport: transportIdentity(p, format),
 		Issuer:    issuerIdentity(p),
-		Audience:  audienceIdentity(p),
+		Audience:  origin,
 	}
 	switch legacyKind {
 	case authKindNone:
@@ -202,6 +218,80 @@ func authPolicyForProvider(p Provider, format model.APIFormat) (AuthPolicy, erro
 	return policy, nil
 }
 
+// requestOriginForModel resolves the exact origin that the constructed client
+// is expected to send to. Explicit model bases are authoritative; empty bases
+// use the reviewed provider registry. Authenticated providers are HTTPS-only.
+// Local no-auth transports are the sole exception and may use loopback HTTP.
+func requestOriginForModel(selected model.Model, required func() (auth.AuthKind, error)) (string, error) {
+	kind, err := required()
+	if err != nil {
+		return "", err
+	}
+	if kind == auth.AuthNone {
+		if strings.TrimSpace(selected.BaseURL) == "" {
+			return "", nil
+		}
+		return canonicalRequestOrigin(selected.BaseURL, true)
+	}
+	if strings.TrimSpace(selected.BaseURL) == "" {
+		return reviewedProviderOrigin(Provider(selected.Provider), selected.APIFormat)
+	}
+	return canonicalRequestOrigin(selected.BaseURL, false)
+}
+
+func canonicalRequestOrigin(raw string, localAllowed bool) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", &InvalidAuthPolicyError{Reason: "request base URL is not a canonical origin"}
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if host == "" {
+		return "", &InvalidAuthPolicyError{Reason: "request base URL has no host"}
+	}
+	if scheme != "https" {
+		if !localAllowed || !isLoopbackOriginHost(host) || scheme != "http" {
+			return "", &InvalidAuthPolicyError{Reason: "authenticated request origin must use HTTPS"}
+		}
+	}
+	port := parsed.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	return scheme + "://" + host, nil
+}
+
+func isLoopbackOriginHost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func reviewedProviderOrigin(provider Provider, format model.APIFormat) (string, error) {
+	if isLocalProvider(provider) {
+		return "", nil
+	}
+	origin, ok := reviewedOrigins[provider]
+	if !ok || origin == "" {
+		return "", &InvalidAuthPolicyError{Reason: fmt.Sprintf("provider %q has no reviewed request origin", provider)}
+	}
+	return canonicalRequestOrigin(origin, false)
+}
+
+func isLocalProvider(provider Provider) bool {
+	switch provider {
+	case ProviderLMStudio, ProviderAtomicChat, ProviderLlamaCPP, ProviderOllama:
+		return true
+	default:
+		return false
+	}
+}
+
+var reviewedOrigins = map[Provider]string{
+	ProviderPhala: "https://inference.phala.com", ProviderChutes: "https://api.chutes.ai", ProviderOpenRouter: "https://openrouter.ai", ProviderOpenAI: "https://api.openai.com", ProviderAzure: "https://cognitiveservices.azure.com", ProviderAzureCognitiveServices: "https://cognitiveservices.azure.com", ProviderAnthropic: "https://api.anthropic.com", ProviderXAI: "https://api.x.ai", ProviderBedrock: "https://bedrock-runtime.amazonaws.com", Provider302AI: "https://api.302.ai", ProviderBaseten: "https://inference.baseten.co", ProviderCerebras: "https://api.cerebras.ai", ProviderCloudflareAIGateway: "https://gateway.ai.cloudflare.com", ProviderCloudflareWorkersAI: "https://api.cloudflare.com", ProviderCortecs: "https://api.cortecs.ai", ProviderDeepSeek: "https://api.deepseek.com", ProviderDeepInfra: "https://api.deepinfra.com", ProviderDigitalOcean: "https://inference.do-ai.run", ProviderFrogBot: "https://app.frogbot.ai", ProviderFireworks: "https://api.fireworks.ai", ProviderGitLab: "https://cloud.gitlab.com", ProviderGitHubCopilot: "https://api.githubcopilot.com", ProviderGMICloud: "https://api.gmi-serving.com", ProviderGoogleVertex: "https://aiplatform.googleapis.com", ProviderGoogleVertexAnthropic: "https://aiplatform.googleapis.com", ProviderGroq: "https://api.groq.com", ProviderHuggingFace: "https://router.huggingface.co", ProviderHelicone: "https://ai-gateway.helicone.ai", ProviderLlama: "https://api.llama.com", ProviderIONet: "https://api.intelligence.io.solutions", ProviderMoonshot: "https://api.moonshot.ai", ProviderMiniMax: "https://api.minimax.io", ProviderNVIDIA: "https://integrate.api.nvidia.com", ProviderNebius: "https://api.tokenfactory.nebius.com", ProviderOllamaCloud: "https://ollama.com", ProviderOpenCode: "https://opencode.ai", ProviderOpenCodeGo: "https://opencode.ai", ProviderLLMGateway: "https://api.llmgateway.io", ProviderSAP: "https://ai.sap.com", ProviderSTACKIT: "https://api.onstackit.cloud", ProviderOVHCloud: "https://oai.endpoints.kepler.ai.cloud.ovh.net", ProviderScaleway: "https://api.scaleway.ai", ProviderSnowflakeCortex: "https://snowflakecomputing.com", ProviderSynthetic: "https://api.synthetic.new", ProviderTogetherAI: "https://api.together.ai", ProviderVenice: "https://api.venice.ai", ProviderVercel: "https://ai-gateway.vercel.sh", ProviderZAI: "https://api.z.ai", ProviderZenMux: "https://zenmux.ai", ProviderGoogle: "https://generativelanguage.googleapis.com",
+}
+
 // Keep the bridge readable without importing the legacy auth package into every
 // policy comparison. These values are the stable names returned by RequiredAuth.
 const (
@@ -232,16 +322,10 @@ func transportIdentity(provider Provider, format model.APIFormat) string {
 }
 
 func issuerIdentity(provider Provider) string {
-	switch provider {
-	case ProviderOpenAI:
-		return "https://api.openai.com"
-	case ProviderAnthropic:
-		return "https://api.anthropic.com"
-	case ProviderGoogle:
-		return "https://generativelanguage.googleapis.com"
-	default:
-		return "https://" + string(provider) + ".invalid"
+	if origin, ok := reviewedOrigins[provider]; ok {
+		return origin
 	}
+	return ""
 }
 
 func audienceIdentity(provider Provider) string {

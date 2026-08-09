@@ -205,7 +205,7 @@ func (c *Client) invokeAnthropic(ctx context.Context, req inference.Request) (*i
 		return nil, err
 	}
 	if httpResp.StatusCode/100 != 2 {
-		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+		return nil, failure.APIErrorFromResponse(httpResp.StatusCode, respBody, httpResp.Header, 0)
 	}
 	return c.codec.DecodeResponse(respBody)
 }
@@ -228,7 +228,7 @@ func (c *Client) invokeConverse(ctx context.Context, req inference.Request) (*in
 		return nil, err
 	}
 	if httpResp.StatusCode/100 != 2 {
-		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+		return nil, failure.APIErrorFromResponse(httpResp.StatusCode, respBody, httpResp.Header, 0)
 	}
 	response, err := (bedrockconverse.Codec{}).DecodeResponse(respBody)
 	if err != nil {
@@ -273,7 +273,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 		if readErr != nil {
 			return nil, readErr
 		}
-		return nil, &failure.APIError{Status: httpResp.StatusCode, Message: string(respBody), Body: respBody}
+		return nil, failure.APIErrorFromResponse(httpResp.StatusCode, respBody, httpResp.Header, 0)
 	}
 	reader, err := (bedrockconverse.Codec{}).DecodeStream(httpResp)
 	if err != nil {

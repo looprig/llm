@@ -7,6 +7,9 @@ package credentialclient
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -124,17 +127,18 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	}
 	var response *inference.Response
 	if ok {
-		response, err = invoker.InvokeWithAuth(ctx, req, lease.Authorizer())
+		response, err = invoker.InvokeWithAuth(ctx, req, c.authorizer(lease))
 	} else {
 		response, err = c.inner.Invoke(ctx, req)
 	}
 	if !ok {
 		return response, err
 	}
-	if !isRefreshableAuthFailure(err) {
+	failureClass, recoverable := c.recoveryClass(err)
+	if !recoverable {
 		return response, err
 	}
-	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), classifyAuthFailure(err)); invalidateErr != nil {
+	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), failureClass); invalidateErr != nil {
 		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
 	}
 	// Exactly one recovery acquisition and one recovery wire exchange. No loop
@@ -143,7 +147,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	if acquireErr != nil {
 		return nil, acquireErr
 	}
-	return invoker.InvokeWithAuth(ctx, req, recoveryLease.Authorizer())
+	return invoker.InvokeWithAuth(ctx, req, c.authorizer(recoveryLease))
 }
 
 // Stream follows the same lease/recovery contract as Invoke. If a failed
@@ -166,27 +170,81 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 	}
 	var reader *stream.StreamReader[content.Chunk]
 	if ok {
-		reader, err = streamer.StreamWithAuth(ctx, req, lease.Authorizer())
+		reader, err = streamer.StreamWithAuth(ctx, req, c.authorizer(lease))
 	} else {
 		reader, err = c.inner.Stream(ctx, req)
 	}
 	if !ok {
 		return reader, err
 	}
-	if !isRefreshableAuthFailure(err) {
+	failureClass, recoverable := c.recoveryClass(err)
+	if !recoverable {
 		return reader, err
 	}
 	if reader != nil {
 		_ = reader.Close()
 	}
-	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), classifyAuthFailure(err)); invalidateErr != nil {
+	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), failureClass); invalidateErr != nil {
 		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
 	}
 	recoveryLease, acquireErr := c.acquire(ctx)
 	if acquireErr != nil {
 		return nil, acquireErr
 	}
-	return streamer.StreamWithAuth(ctx, req, recoveryLease.Authorizer())
+	return streamer.StreamWithAuth(ctx, req, c.authorizer(recoveryLease))
+}
+
+func (c *Client) authorizer(lease credentials.Lease) httpauth.Authorizer {
+	if lease == nil {
+		return &originAuthorizer{expected: ""}
+	}
+	if len(c.policy.Accepted) == 0 || c.policy.Accepted[0].Audience == "" {
+		return lease.Authorizer()
+	}
+	return &originAuthorizer{inner: lease.Authorizer(), expected: c.policy.Accepted[0].Audience}
+}
+
+type originAuthorizer struct {
+	inner    httpauth.Authorizer
+	expected string
+}
+
+func (a *originAuthorizer) Authorize(ctx context.Context, request *http.Request) error {
+	if request == nil || request.URL == nil {
+		return &LeaseError{Reason: "credential request has no URL"}
+	}
+	origin, err := requestOrigin(request.URL)
+	if err != nil || origin != a.expected {
+		return &LeaseError{Reason: "credential request origin does not match the exact policy audience"}
+	}
+	if a.inner == nil {
+		return &LeaseError{Reason: "credential lease has no authorizer"}
+	}
+	return a.inner.Authorize(ctx, request)
+}
+
+func (a *originAuthorizer) String() string { return "llm origin-guarded authorizer" }
+
+func requestOrigin(value *url.URL) (string, error) {
+	if value == nil || value.Scheme == "" || value.Host == "" || value.User != nil {
+		return "", errors.New("invalid request origin")
+	}
+	scheme := strings.ToLower(value.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return "", errors.New("unsupported request origin scheme")
+	}
+	host := strings.ToLower(strings.TrimSuffix(value.Hostname(), "."))
+	if host == "" {
+		return "", errors.New("request origin has no host")
+	}
+	port := value.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	return scheme + "://" + host, nil
 }
 
 func (c *Client) acquire(ctx context.Context) (credentials.Lease, error) {
@@ -213,15 +271,48 @@ func (c *Client) acquire(ctx context.Context) (credentials.Lease, error) {
 	return lease, nil
 }
 
-func isRefreshableAuthFailure(err error) bool {
-	_, ok := ClassifyAuthFailure(err)
-	return ok
+type renewableSource interface {
+	CanRecover(credentials.Failure) bool
+}
+
+func (c *Client) recoveryClass(err error) (credentials.Failure, bool) {
+	failureClass, ok := classifyAuthFailureForTransport(c.transport(), err)
+	if !ok {
+		return "", false
+	}
+	renewable, ok := c.source.(renewableSource)
+	if !ok || !renewable.CanRecover(failureClass) {
+		return "", false
+	}
+	return failureClass, true
+}
+
+func (c *Client) transport() string {
+	if c == nil || len(c.policy.Accepted) == 0 {
+		return ""
+	}
+	return c.policy.Accepted[0].Transport
 }
 
 // ClassifyAuthFailure maps bounded provider errors into the closed credentials
 // failure classes. Only explicit authentication codes can trigger a refresh;
 // malformed requests, permission denials, quota, and rate limits cannot.
 func ClassifyAuthFailure(err error) (credentials.Failure, bool) {
+	return classifyAuthFailureForTransport("", err)
+}
+
+var authFailureCodesByTransport = map[string]map[string]struct{}{
+	"":                 {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"openai":           {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"anthropic":        {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"gemini":           {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"responses":        {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"messages":         {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"generate-content": {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"bedrock-converse": {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+}
+
+func classifyAuthFailureForTransport(transport string, err error) (credentials.Failure, bool) {
 	if err == nil {
 		return "", false
 	}
@@ -233,11 +324,12 @@ func ClassifyAuthFailure(err error) (credentials.Failure, bool) {
 	if code == "" {
 		code = strings.ToLower(strings.TrimSpace(apiErr.ProviderCode))
 	}
-	switch code {
-	case "", "unauthorized", "unauthenticated", "authentication_error", "invalid_api_key":
-		if apiErr.Status == 401 || (apiErr.Status == 403 && code != "") {
-			return classifyAuthFailure(err), true
-		}
+	allowed, supported := authFailureCodesByTransport[strings.ToLower(strings.TrimSpace(transport))]
+	if !supported {
+		return "", false
+	}
+	if _, safe := allowed[code]; safe && (apiErr.Status == 401 || apiErr.Status == 403) {
+		return classifyAuthFailure(err), true
 	}
 	return "", false
 }

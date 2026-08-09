@@ -112,6 +112,54 @@ func TestAuthPolicyForModelBridgesLegacyRequiredAuth(t *testing.T) {
 	if binding.Transport == "" || binding.Issuer == "" || binding.Audience == "" {
 		t.Fatalf("legacy bridge omitted exact identity fields: %#v", binding)
 	}
+	if binding.Audience != "https://api.openai.com" {
+		t.Fatalf("default audience = %q, want resolved request origin", binding.Audience)
+	}
+}
+
+func TestAuthPolicyBindsCustomRequestOriginExactly(t *testing.T) {
+	t.Parallel()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenAI), model.APIFormatOpenAI, "https://proxy.example.test/v1", "gpt-test")
+	policy, err := llm.AuthPolicyForModel(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := policy.Accepted[0].Audience; got != "https://proxy.example.test" {
+		t.Fatalf("custom audience = %q, want exact origin", got)
+	}
+	if got := policy.Accepted[0].Issuer; got != "https://api.openai.com" {
+		t.Fatalf("custom issuer = %q, want reviewed OpenAI issuer", got)
+	}
+}
+
+func TestAuthPolicyRejectsMalformedOrInsecureAuthenticatedOrigin(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{"http://proxy.example.test/v1", "https://proxy.example.test/a?query=1", "https://proxy.example.test/a#fragment", "https://user:pass@proxy.example.test/v1", "https://"}
+	for _, baseURL := range tests {
+		baseURL := baseURL
+		t.Run(baseURL, func(t *testing.T) {
+			selected := model.CustomModel(model.ProviderName(llm.ProviderOpenAI), model.APIFormatOpenAI, baseURL, "gpt-test")
+			if _, err := llm.AuthPolicyForModel(selected); err == nil {
+				t.Fatalf("AuthPolicyForModel(%q) = nil error, want rejected origin", baseURL)
+			}
+		})
+	}
+}
+
+func TestAuthPolicyAllowsExplicitLocalNoneOrigin(t *testing.T) {
+	t.Parallel()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderLMStudio), model.APIFormatOpenAI, "http://127.0.0.1:1234/v1", "local-model")
+	policy, err := llm.AuthPolicyForModel(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := policy.Accepted[0]
+	if binding.Scheme != credentials.SchemeNone || binding.Issuer != "" || binding.Audience != "" {
+		t.Fatalf("local policy = %#v, want explicit None with empty authority", binding)
+	}
 }
 
 func TestProviderAuthPolicyRejectsUnsupportedFormat(t *testing.T) {
@@ -131,9 +179,9 @@ func TestAuthPolicyCanonicalizesDescriptorIdentifiers(t *testing.T) {
 		Scheme:    credentials.SchemeAPIKey,
 		Usage:     credentials.UsageMeteredAPI,
 		Issuer:    "https://api.openai.com",
-		Audience:  "api://openai",
+		Audience:  "https://api.openai.com",
 	}}}
-	descriptor, err := credentials.NewDescriptor("openai", "responses", credentials.SchemeAPIKey, credentials.UsageMeteredAPI, "https://api.openai.com", "api://openai", "")
+	descriptor, err := credentials.NewDescriptor("openai", "responses", credentials.SchemeAPIKey, credentials.UsageMeteredAPI, "https://api.openai.com", "https://api.openai.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}

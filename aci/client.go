@@ -633,11 +633,7 @@ func (c *Client) postInference(ctx context.Context, sealed *sealedRequest) ([]by
 		return nil, "", &failure.NetworkError{Err: err}
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, "", &failure.APIError{
-			Status:  resp.StatusCode,
-			Message: "aci inference request failed",
-			Body:    body,
-		}
+		return nil, "", failure.APIErrorFromResponse(resp.StatusCode, body, resp.Header, 0)
 	}
 	return body, resp.Header.Get(receiptIDHeader), nil
 }
@@ -671,11 +667,7 @@ func (c *Client) fetchReceipt(ctx context.Context, receiptID string) ([]byte, er
 		return nil, &failure.NetworkError{Err: err}
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, &failure.APIError{
-			Status:  resp.StatusCode,
-			Message: "aci receipt fetch failed",
-			Body:    body,
-		}
+		return nil, failure.APIErrorFromResponse(resp.StatusCode, body, resp.Header, 0)
 	}
 	return body, nil
 }
@@ -715,11 +707,7 @@ func (c *Client) attestModel(ctx context.Context, model string) (*VerifiedReport
 		return nil, attestErr(reasonQuoteInvalid, &failure.NetworkError{Err: err})
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, attestErr(reasonQuoteInvalid, &failure.APIError{
-			Status:  resp.StatusCode,
-			Message: "aci attestation fetch failed",
-			Body:    reportJSON,
-		})
+		return nil, attestErr(reasonQuoteInvalid, failure.APIErrorFromResponse(resp.StatusCode, reportJSON, resp.Header, 0))
 	}
 
 	return verifyReport(reportJSON, &nonce, c.now(), c.policy, c.quoteVerifier)

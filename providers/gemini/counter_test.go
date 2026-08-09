@@ -479,8 +479,11 @@ func TestCounterTransportErrors(t *testing.T) {
 				if !errors.As(err, &apiErr) {
 					t.Fatalf("error = %T, want *failure.APIError", err)
 				}
-				if apiErr.Status != tt.wantStatus || len(apiErr.Body) != tt.wantBody || apiErr.Message != string(apiErr.Body) {
-					t.Errorf("APIError = status:%d body:%d message:%d, want status:%d body/message:%d", apiErr.Status, len(apiErr.Body), len(apiErr.Message), tt.wantStatus, tt.wantBody)
+				if apiErr.Status != tt.wantStatus {
+					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tt.wantStatus)
+				}
+				if strings.Contains(err.Error(), strings.Repeat("x", 64)) {
+					t.Error("API error leaked provider body")
 				}
 			}
 			if tt.wantNet {

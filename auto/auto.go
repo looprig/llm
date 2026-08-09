@@ -254,17 +254,19 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	if err != nil {
 		return nil, err
 	}
-	if constructorKey != "credential-source" && !credentialclient.SupportsCallScoped(inner) {
-		// A small number of historical bespoke clients predate the additive
-		// call-scoped transport methods. Keep their concrete constructors and
-		// static-key behavior source-compatible; dynamic sources still fail closed
-		// in credentialclient.New below.
-		if _, static := source.(*credentialclient.StaticSource); static {
-			return inner, nil
+	if !credentialclient.SupportsCallScoped(inner) {
+		if constructorKey != "credential-source" {
+			// Preserve the legacy static New surface for bespoke clients that have
+			// not yet adopted call-scoped authorization. NewWithAuth remains
+			// fail-closed for dynamic sources.
+			if _, static := source.(*credentialclient.StaticSource); static {
+				return inner, nil
+			}
+			if _, none := source.(*credentials.NoneSource); none {
+				return inner, nil
+			}
 		}
-		if _, none := source.(*credentials.NoneSource); none {
-			return inner, nil
-		}
+		return nil, &credentialclient.ConstructionError{Reason: "provider client does not support call-scoped authorization"}
 	}
 	return credentialclient.New(inner, source, policy)
 }

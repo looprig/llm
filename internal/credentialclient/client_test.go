@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +52,26 @@ func TestClientRechecksLeaseBindingBeforeAuthorization(t *testing.T) {
 	}
 }
 
+func TestClientOriginGuardsConcreteRequestBeforeCredentialAttach(t *testing.T) {
+	t.Parallel()
+
+	policy := testPolicy()
+	descriptor := testDescriptor(policy.Accepted[0])
+	authorizer := &countingAuthorizer{}
+	source := &fakeSource{descriptor: descriptor, leases: []credentials.Lease{fakeLease{descriptor: descriptor, generation: mustGeneration(t, "origin"), authorizer: authorizer}}}
+	inner := &originCheckingClient{url: "https://evil.example/v1/chat/completions"}
+	client, err := New(inner, source, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{}); err == nil {
+		t.Fatal("Invoke() = nil error for cross-origin concrete request")
+	}
+	if got := authorizer.calls; got != 0 {
+		t.Fatalf("credential authorizer calls = %d, want zero", got)
+	}
+}
+
 func TestClientInvalidatesAndReacquiresOnceForRefreshableAuthFailure(t *testing.T) {
 	t.Parallel()
 
@@ -58,7 +79,7 @@ func TestClientInvalidatesAndReacquiresOnceForRefreshableAuthFailure(t *testing.
 	descriptor := testDescriptor(policy.Accepted[0])
 	first := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "one")}
 	second := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "two")}
-	source := &fakeSource{descriptor: descriptor, leases: []credentials.Lease{first, second}}
+	source := &fakeSource{descriptor: descriptor, recoverable: true, leases: []credentials.Lease{first, second}}
 	inner := &scopedClient{invokeErrs: []error{
 		&failure.APIError{Status: 401, Code: "unauthorized"},
 		nil,
@@ -88,7 +109,7 @@ func TestClientDoesNotResetOuterBudgetAfterRecoveryFailure(t *testing.T) {
 	descriptor := testDescriptor(policy.Accepted[0])
 	first := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "one")}
 	second := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "two")}
-	source := &fakeSource{descriptor: descriptor, leases: []credentials.Lease{first, second}}
+	source := &fakeSource{descriptor: descriptor, recoverable: true, leases: []credentials.Lease{first, second}}
 	authErr := &failure.APIError{Status: 401, Code: "unauthorized"}
 	inner := &scopedClient{invokeErrs: []error{authErr, authErr, nil}}
 	client, err := New(inner, source, policy)
@@ -103,6 +124,50 @@ func TestClientDoesNotResetOuterBudgetAfterRecoveryFailure(t *testing.T) {
 	}
 	if got := source.invalidateCount(); got != 1 {
 		t.Fatalf("invalidations = %d, want one", got)
+	}
+}
+
+func TestClientRequiresRenewableSourceForRecovery(t *testing.T) {
+	t.Parallel()
+
+	policy := testPolicy()
+	descriptor := testDescriptor(policy.Accepted[0])
+	first := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "non-renewable")}
+	source := &fakeSource{descriptor: descriptor, leases: []credentials.Lease{first}}
+	inner := &scopedClient{invokeErrs: []error{&failure.APIError{Status: 401, Code: "unauthorized"}}}
+	client, err := New(inner, source, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{}); err == nil {
+		t.Fatal("Invoke() = nil error, want original auth error")
+	}
+	if got := inner.invokeCount(); got != 1 {
+		t.Fatalf("wire attempts = %d, want one", got)
+	}
+	if got := source.invalidateCount(); got != 0 {
+		t.Fatalf("invalidations = %d, want zero", got)
+	}
+}
+
+func TestClientRequiresExplicitSafeAuthCodeForRecovery(t *testing.T) {
+	t.Parallel()
+
+	policy := testPolicy()
+	descriptor := testDescriptor(policy.Accepted[0])
+	first := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "blank-code")}
+	second := fakeLease{descriptor: descriptor, generation: mustGeneration(t, "unused")}
+	source := &fakeSource{descriptor: descriptor, recoverable: true, leases: []credentials.Lease{first, second}}
+	inner := &scopedClient{invokeErrs: []error{&failure.APIError{Status: 401}}}
+	client, err := New(inner, source, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{}); err == nil {
+		t.Fatal("Invoke() = nil error, want original auth error")
+	}
+	if got := inner.invokeCount(); got != 1 {
+		t.Fatalf("wire attempts = %d, want one", got)
 	}
 }
 
@@ -151,7 +216,7 @@ func testPolicy() llm.AuthPolicy {
 		Scheme:    credentials.SchemeAPIKey,
 		Usage:     credentials.UsageMeteredAPI,
 		Issuer:    "https://api.openai.com",
-		Audience:  "api://openai",
+		Audience:  "https://api.openai.com",
 	}}}
 }
 
@@ -175,11 +240,14 @@ func mustGeneration(t *testing.T, value string) credentials.Generation {
 type fakeSource struct {
 	mu          sync.Mutex
 	descriptor  credentials.Descriptor
+	recoverable bool
 	leases      []credentials.Lease
 	acquires    int
 	invalidates int
 	invalidated credentials.Generation
 }
+
+func (s *fakeSource) CanRecover(credentials.Failure) bool { return s.recoverable }
 
 func (s *fakeSource) Reference() credentials.Reference   { return credentials.Reference{} }
 func (s *fakeSource) Descriptor() credentials.Descriptor { return s.descriptor }
@@ -214,12 +282,47 @@ func (s *fakeSource) invalidatedGeneration() credentials.Generation {
 type fakeLease struct {
 	descriptor credentials.Descriptor
 	generation credentials.Generation
+	authorizer httpauth.Authorizer
 }
 
 func (l fakeLease) Generation() credentials.Generation { return l.generation }
 func (l fakeLease) Descriptor() credentials.Descriptor { return l.descriptor }
 func (l fakeLease) ExpiresAt() time.Time               { return time.Time{} }
-func (l fakeLease) Authorizer() httpauth.Authorizer    { return httpauth.None() }
+func (l fakeLease) Authorizer() httpauth.Authorizer {
+	if l.authorizer != nil {
+		return l.authorizer
+	}
+	return httpauth.None()
+}
+
+type countingAuthorizer struct{ calls int }
+
+func (a *countingAuthorizer) Authorize(context.Context, *http.Request) error {
+	a.calls++
+	return nil
+}
+
+type originCheckingClient struct{ url string }
+
+func (*originCheckingClient) Invoke(context.Context, inference.Request) (*inference.Response, error) {
+	return nil, errors.New("legacy Invoke should not be called")
+}
+func (*originCheckingClient) Stream(context.Context, inference.Request) (*stream.StreamReader[content.Chunk], error) {
+	return nil, errors.New("legacy Stream should not be called")
+}
+func (c *originCheckingClient) InvokeWithAuth(ctx context.Context, _ inference.Request, authorizer httpauth.Authorizer) (*inference.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorizer.Authorize(ctx, request); err != nil {
+		return nil, err
+	}
+	return &inference.Response{}, nil
+}
+func (*originCheckingClient) StreamWithAuth(context.Context, inference.Request, httpauth.Authorizer) (*stream.StreamReader[content.Chunk], error) {
+	return nil, io.EOF
+}
 
 type scopedClient struct {
 	mu         sync.Mutex

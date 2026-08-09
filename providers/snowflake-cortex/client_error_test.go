@@ -30,16 +30,6 @@ func TestIsConversationCompleteRequiresExplicitSafeCode(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "formatted message is not a classifier",
-			err:  &failure.APIError{Status: 400, Message: "conversation complete"},
-			want: false,
-		},
-		{
-			name: "deprecated body is not a classifier",
-			err:  &failure.APIError{Status: 400, Body: []byte(`{"message":"conversation complete"}`)},
-			want: false,
-		},
-		{
 			name: "wrong status",
 			err:  &failure.APIError{Status: 401, Code: "conversation_complete"},
 			want: false,

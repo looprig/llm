@@ -305,8 +305,8 @@ func TestGeminiInvokeErrors(t *testing.T) {
 				if apiErr.Status != tt.wantAPICode {
 					t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tt.wantAPICode)
 				}
-				if len(apiErr.Body) == 0 {
-					t.Error("APIError.Body is empty, want the raw provider payload")
+				if strings.Contains(err.Error(), "api key not valid") || strings.Contains(err.Error(), "boom") {
+					t.Error("API error leaked provider payload")
 				}
 			case tt.wantNetErr:
 				var netErr *failure.NetworkError
@@ -318,10 +318,9 @@ func TestGeminiInvokeErrors(t *testing.T) {
 	}
 }
 
-// TestGeminiAPIErrorBodyBound locks the shared provider error-body policy used
-// by Invoke, Stream, and the separately constructed context counter. A hostile
-// endpoint cannot force an unbounded allocation, while callers still receive a
-// typed APIError with the retained prefix.
+// TestGeminiAPIErrorBodyBound locks the shared sanitized provider error policy
+// used by Invoke and Stream. A hostile endpoint cannot force an unbounded
+// allocation or make raw provider text observable through APIError.
 func TestGeminiAPIErrorBodyBound(t *testing.T) {
 	t.Parallel()
 
@@ -355,11 +354,8 @@ func TestGeminiAPIErrorBodyBound(t *testing.T) {
 			if !errors.As(err, &apiErr) {
 				t.Fatalf("error = %T, want *failure.APIError", err)
 			}
-			if len(apiErr.Body) != wantLimit {
-				t.Errorf("APIError.Body length = %d, want bounded %d", len(apiErr.Body), wantLimit)
-			}
-			if apiErr.Message != string(apiErr.Body) {
-				t.Errorf("APIError.Message length = %d, want retained body prefix length %d", len(apiErr.Message), len(apiErr.Body))
+			if strings.Contains(err.Error(), strings.Repeat("x", 64)) {
+				t.Error("API error leaked provider body")
 			}
 		})
 	}
@@ -459,8 +455,8 @@ func TestGeminiStreamErrorStatus(t *testing.T) {
 	if apiErr.Status != http.StatusTooManyRequests {
 		t.Errorf("APIError.Status = %d, want %d", apiErr.Status, http.StatusTooManyRequests)
 	}
-	if len(apiErr.Body) == 0 {
-		t.Error("APIError.Body is empty, want the raw provider payload")
+	if strings.Contains(err.Error(), "rate limited") {
+		t.Error("API error leaked provider payload")
 	}
 }
 

@@ -515,9 +515,6 @@ func TestCounterHTTPFailures(t *testing.T) {
 				if apiErr.Status != tt.status {
 					t.Errorf("status = %d, want %d", apiErr.Status, tt.status)
 				}
-				if len(apiErr.Body) > maxCountResponseBodyBytes {
-					t.Errorf("API body length = %d, exceeds bound", len(apiErr.Body))
-				}
 				if strings.Contains(err.Error(), "provider-secret-payload") {
 					t.Errorf("API error string leaked provider payload")
 				}
