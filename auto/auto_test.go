@@ -2,6 +2,7 @@ package auto
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -33,6 +34,11 @@ import (
 // The helpers below stand in for the deleted model catalogue: each returns a valid
 // Model (OriginCustom) via model.CustomModel, used purely as a test fixture. They
 // keep the repeated model rows DRY across this file's dispatch tables.
+func testTLSRoots(srv *httptest.Server) *x509.CertPool {
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	return roots
+}
 func chutesKimiK2Model() model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderChutes), model.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", model.WithContextLimits(model.ContextLimits{WindowTokens: 128_000}), model.WithTools(), model.WithThinking())
 }
@@ -409,7 +415,7 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 	defer srv.Close()
 
 	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
-	client, err := New(selected, "sk-or-test", WithRoundTripper(srv.Client().Transport), WithOpenRouterOptions(openrouter.WithUsage(false)))
+	client, err := New(selected, "sk-or-test", WithTLSRootCAs(testTLSRoots(srv)), WithOpenRouterOptions(openrouter.WithUsage(false)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -444,7 +450,7 @@ func TestNewWithOpenRouterDelegatesStaticAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
-	client, err := New(selected, "sk-or-static", WithRoundTripper(srv.Client().Transport))
+	client, err := New(selected, "sk-or-static", WithTLSRootCAs(testTLSRoots(srv)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -485,7 +491,7 @@ func TestNewWithAuthUsesLeaseAuthorizer(t *testing.T) {
 		generation: generation,
 		authorizer: auth.Key("lease-key"),
 	}}
-	client, err := NewWithAuth(selected, source, WithRoundTripper(srv.Client().Transport))
+	client, err := NewWithAuth(selected, source, WithTLSRootCAs(testTLSRoots(srv)))
 	if err != nil {
 		t.Fatalf("NewWithAuth() error = %v", err)
 	}

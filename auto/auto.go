@@ -13,8 +13,8 @@
 package auto
 
 import (
+	"crypto/x509"
 	"fmt"
-	"net/http"
 
 	"github.com/looprig/credentials"
 	"github.com/looprig/credentials/httpauth"
@@ -136,16 +136,16 @@ type options struct {
 	openRouter        []openrouter.Option
 	constructorKey    auth.APIKey
 	constructorKeySet bool
-	roundTripper      http.RoundTripper
+	tlsRootCAs        *x509.CertPool
 }
 
 // WithRoundTripper supplies a verified caller-owned transport to supported
 // generic clients; nil is rejected immediately.
-func WithRoundTripper(rt http.RoundTripper) Option {
-	if rt == nil {
-		panic("auto: round tripper must not be nil")
+func WithTLSRootCAs(roots *x509.CertPool) Option {
+	if roots == nil {
+		panic("auto: TLS roots must not be nil")
 	}
-	return func(config *options) { config.roundTripper = rt }
+	return func(config *options) { config.tlsRootCAs = roots }
 }
 
 // WithOpenRouterOptions applies OpenRouter-specific headers and request-body
@@ -256,6 +256,9 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	if err := credentialclient.ValidateSource(source, policy); err != nil {
 		return nil, err
 	}
+	if constructorKey == "credential-source" && !dynamicPolicySupported(selected) {
+		return nil, &credentialclient.ConstructionError{Reason: "provider/API format does not support dynamic call-scoped credentials"}
+	}
 	// Existing provider constructors remain the compatibility construction seam.
 	// NewWithAuth uses a non-secret sentinel; the legacy New wrapper carries its
 	// explicit key through a private option so old concrete constructors retain
@@ -280,6 +283,16 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 		return nil, &credentialclient.ConstructionError{Reason: "provider client does not support call-scoped authorization"}
 	}
 	return credentialclient.New(inner, source, policy)
+}
+
+func dynamicPolicySupported(selected model.Model) bool {
+	switch llm.Provider(selected.Provider) {
+	case llm.ProviderChutes, llm.ProviderGoogle, llm.ProviderGoogleVertex, llm.ProviderGoogleVertexAnthropic,
+		llm.ProviderSAP, llm.ProviderSnowflakeCortex:
+		return false
+	default:
+		return true
+	}
 }
 
 // constructInner retains the existing provider dispatch and constructor
@@ -349,10 +362,10 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options)
 		// OpenRouter is an OpenAI-compatible aggregation gateway behind a Bearer key. The
 		// fail-closed empty-key guard above (RequiredAuth → AuthAPIKey) already rejected a
 		// missing key, so key is present here; wrap it as Bearer auth.
-		if len(config.openRouter) > 0 || config.roundTripper != nil {
+		if len(config.openRouter) > 0 || config.tlsRootCAs != nil {
 			options := append([]openrouter.Option(nil), config.openRouter...)
-			if config.roundTripper != nil {
-				options = append(options, openrouter.WithRoundTripper(config.roundTripper))
+			if config.tlsRootCAs != nil {
+				options = append(options, openrouter.WithTLSRootCAs(config.tlsRootCAs))
 			}
 			return openrouter.New(selected, key, options...)
 		}
@@ -362,8 +375,8 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options)
 		return genericHTTPWithAuth(selected)
 	case llm.ProviderOpenAI:
 		var options []openaiprovider.Option
-		if config.roundTripper != nil {
-			options = append(options, openaiprovider.WithRoundTripper(config.roundTripper))
+		if config.tlsRootCAs != nil {
+			options = append(options, openaiprovider.WithTLSRootCAs(config.tlsRootCAs))
 		}
 		return openaiprovider.New(selected, key, options...)
 	case llm.ProviderAzure:

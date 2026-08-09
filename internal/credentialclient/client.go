@@ -198,10 +198,10 @@ func (c *Client) authorizer(lease credentials.Lease) httpauth.Authorizer {
 	if lease == nil {
 		return &originAuthorizer{expected: ""}
 	}
-	if len(c.policy.Accepted) == 0 || c.policy.Accepted[0].Audience == "" {
+	if c.sourceBinding.Audience == "" {
 		return lease.Authorizer()
 	}
-	return &originAuthorizer{inner: lease.Authorizer(), expected: c.policy.Accepted[0].Audience}
+	return &originAuthorizer{inner: lease.Authorizer(), expected: c.sourceBinding.Audience}
 }
 
 type originAuthorizer struct {
@@ -276,7 +276,7 @@ type renewableSource interface {
 }
 
 func (c *Client) recoveryClass(err error) (credentials.Failure, bool) {
-	failureClass, ok := classifyAuthFailureForTransport(c.transport(), err)
+	failureClass, ok := classifyAuthFailureForTransport(c.sourceBinding.Transport, err)
 	if !ok {
 		return "", false
 	}
@@ -285,13 +285,6 @@ func (c *Client) recoveryClass(err error) (credentials.Failure, bool) {
 		return "", false
 	}
 	return failureClass, true
-}
-
-func (c *Client) transport() string {
-	if c == nil || len(c.policy.Accepted) == 0 {
-		return ""
-	}
-	return c.policy.Accepted[0].Transport
 }
 
 // ClassifyAuthFailure maps bounded provider errors into the closed credentials
@@ -307,6 +300,8 @@ var authFailureCodesByTransport = map[string]map[string]struct{}{
 	"anthropic":        {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
 	"gemini":           {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
 	"responses":        {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"chat":             {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
+	"openai-responses": {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
 	"messages":         {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
 	"generate-content": {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},
 	"bedrock-converse": {"unauthorized": {}, "unauthenticated": {}, "authentication_error": {}, "invalid_api_key": {}},

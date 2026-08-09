@@ -4,6 +4,7 @@ package openrouter
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,7 +55,7 @@ type config struct {
 	reasoning       *ReasoningOptions
 	promptCacheKey  string
 	providerRouting *ProviderRoutingOptions
-	roundTripper    http.RoundTripper
+	tlsRootCAs      *x509.CertPool
 }
 
 // Option customizes an OpenRouter client at construction time.
@@ -62,11 +63,11 @@ type Option func(*config)
 
 // WithRoundTripper installs a caller-owned verified transport for tests and
 // controlled clients; nil is rejected rather than silently using defaults.
-func WithRoundTripper(rt http.RoundTripper) Option {
-	if rt == nil {
-		panic("openrouter: round tripper must not be nil")
+func WithTLSRootCAs(roots *x509.CertPool) Option {
+	if roots == nil {
+		panic("openrouter: TLS roots must not be nil")
 	}
-	return func(c *config) { c.roundTripper = rt }
+	return func(c *config) { c.tlsRootCAs = roots }
 }
 
 // WithHTTPReferer adds OpenRouter's optional HTTP-Referer attribution header.
@@ -157,8 +158,8 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 	}
 
 	transportOptions := []transport.Option{}
-	if cfg.roundTripper != nil {
-		transportOptions = append(transportOptions, transport.WithRoundTripper(cfg.roundTripper))
+	if cfg.tlsRootCAs != nil {
+		transportOptions = append(transportOptions, transport.WithTLSRootCAs(cfg.tlsRootCAs))
 	}
 	return transport.New(
 		transport.Endpoint{

@@ -56,8 +56,8 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		baseURL = defaultBaseURL
 	}
 	transportOptions := []transport.Option{}
-	if cfg.roundTripper != nil {
-		transportOptions = append(transportOptions, transport.WithRoundTripper(cfg.roundTripper))
+	if cfg.tlsRootCAs != nil {
+		transportOptions = append(transportOptions, transport.WithTLSRootCAs(cfg.tlsRootCAs))
 	}
 	return transport.New(
 		transport.Endpoint{
