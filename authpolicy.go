@@ -327,7 +327,3 @@ func issuerIdentity(provider Provider) string {
 	}
 	return ""
 }
-
-func audienceIdentity(provider Provider) string {
-	return "api://" + string(provider)
-}
