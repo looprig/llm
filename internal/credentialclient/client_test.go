@@ -14,6 +14,7 @@ import (
 	"github.com/looprig/credentials/httpauth"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/failure"
+	"github.com/looprig/inference/retry"
 	"github.com/looprig/inference/stream"
 	"github.com/looprig/llm"
 )
@@ -139,6 +140,42 @@ func TestClientDoesNotResetOuterBudgetAfterRecoveryFailure(t *testing.T) {
 	}
 	if got := source.invalidateCount(); got != 1 {
 		t.Fatalf("invalidations = %d, want one", got)
+	}
+}
+
+func TestClientComposesWithInferenceRetry(t *testing.T) {
+	policy := testPolicy()
+	descriptor := testDescriptor(policy.Accepted[0])
+	source := &fakeSource{descriptor: descriptor, recoverable: true, leases: []credentials.Lease{
+		fakeLease{descriptor: descriptor, generation: mustGeneration(t, "one")},
+		fakeLease{descriptor: descriptor, generation: mustGeneration(t, "two")},
+		fakeLease{descriptor: descriptor, generation: mustGeneration(t, "three")},
+	}}
+	inner := &scopedClient{invokeErrs: []error{
+		&failure.APIError{Status: 401, Code: "unauthorized"},
+		&failure.APIError{Status: 500, Code: "server_error"},
+		nil,
+	}}
+	client, err := New(inner, source, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := retry.New(client, retry.Policy{StableRetries: 0, StableDelay: time.Nanosecond, MaxAttempts: 2, MaxDelay: time.Nanosecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := outer.Invoke(context.Background(), inference.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Attempts != 2 {
+		t.Fatalf("outer attempts = %d, want 2", response.Attempts)
+	}
+	if got := inner.invokeCount(); got != 3 {
+		t.Fatalf("wire attempts = %d, want 3", got)
+	}
+	if got := source.invalidateCount(); got != 1 {
+		t.Fatalf("invalidations = %d, want 1", got)
 	}
 }
 

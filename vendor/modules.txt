@@ -172,6 +172,7 @@ github.com/looprig/inference/failure
 github.com/looprig/inference/internal/jsonstrict
 github.com/looprig/inference/internal/usagenorm
 github.com/looprig/inference/model
+github.com/looprig/inference/retry
 github.com/looprig/inference/route
 github.com/looprig/inference/stream
 github.com/looprig/inference/transport
