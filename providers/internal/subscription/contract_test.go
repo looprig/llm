@@ -37,6 +37,23 @@ func TestRunRejectsAnUnconfiguredContract(t *testing.T) {
 	}
 }
 
+func TestCertificationWitnessRequiresAnExplicitConstructor(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewWitness(Contract{}); err == nil {
+		t.Fatal("NewWitness(Contract{}) = nil error, want fail-closed certification error")
+	}
+
+	contract := fixtureContract()
+	witness, err := NewWitness(contract)
+	if err != nil {
+		t.Fatalf("NewWitness(fixtureContract()) error = %v", err)
+	}
+	if err := witness.Validate(); err != nil {
+		t.Fatalf("Witness.Validate() error = %v", err)
+	}
+}
+
 func TestContractMatrixInvokesEveryIngressCodec(t *testing.T) {
 	server := NewServer(t)
 	defer server.Close()
@@ -52,8 +69,8 @@ func TestContractMatrixInvokesEveryIngressCodec(t *testing.T) {
 	if err := Execute(contract, server); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := constructorCalls.Load(), int32(len(contract.Formats)*4); got != want {
-		t.Fatalf("constructor calls = %d, want %d (invoke/stream/error/recovery per format)", got, want)
+	if got, want := constructorCalls.Load(), int32(len(contract.Formats)*7); got != want {
+		t.Fatalf("constructor calls = %d, want %d (normal/error/redirect/lifecycle/recovery/concurrent per format)", got, want)
 	}
 }
 

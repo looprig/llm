@@ -44,6 +44,14 @@ type Client struct {
 	policy        llm.AuthPolicy
 	sourceBinding credentials.Descriptor
 	allowLegacy   bool
+	recoveryMu    sync.Mutex
+	recovery      *recoveryState
+}
+
+type recoveryState struct {
+	generation credentials.Generation
+	done       chan struct{}
+	err        error
 }
 
 // New binds source to inner under one exact policy. A nil source is never
@@ -138,7 +146,7 @@ func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.
 	if !recoverable {
 		return response, err
 	}
-	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), failureClass); invalidateErr != nil {
+	if invalidateErr := c.invalidateOnce(ctx, lease.Generation(), failureClass); invalidateErr != nil {
 		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
 	}
 	// Exactly one recovery acquisition and one recovery wire exchange. No loop
@@ -184,7 +192,7 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 	if reader != nil {
 		_ = reader.Close()
 	}
-	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), failureClass); invalidateErr != nil {
+	if invalidateErr := c.invalidateOnce(ctx, lease.Generation(), failureClass); invalidateErr != nil {
 		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
 	}
 	recoveryLease, acquireErr := c.acquire(ctx)
@@ -192,6 +200,34 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 		return nil, acquireErr
 	}
 	return streamer.StreamWithAuth(ctx, req, c.authorizer(recoveryLease))
+}
+
+// invalidateOnce serializes invalidation for one source generation. Many
+// concurrent calls can observe the same expired lease, but only the first
+// caller is allowed to mutate source state; followers wait for that result and
+// perform their own single bounded recovery acquisition/wire attempt.
+func (c *Client) invalidateOnce(ctx context.Context, generation credentials.Generation, failure credentials.Failure) error {
+	c.recoveryMu.Lock()
+	if current := c.recovery; current != nil && current.generation == generation {
+		done := current.done
+		c.recoveryMu.Unlock()
+		select {
+		case <-done:
+			c.recoveryMu.Lock()
+			err := current.err
+			c.recoveryMu.Unlock()
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	state := &recoveryState{generation: generation, done: make(chan struct{})}
+	c.recovery = state
+	c.recoveryMu.Unlock()
+
+	state.err = c.source.Invalidate(ctx, generation, failure)
+	close(state.done)
+	return state.err
 }
 
 func (c *Client) authorizer(lease credentials.Lease) httpauth.Authorizer {

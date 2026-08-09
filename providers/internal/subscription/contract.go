@@ -4,6 +4,7 @@
 package subscription
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"embed"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/looprig/core/content"
 	"github.com/looprig/credentials"
@@ -64,6 +66,36 @@ type Contract struct {
 	Constructor Constructor
 }
 
+// Witness is the fail-closed certification handle for an enabled subscription
+// constructor. Provider package tests should construct one with their explicit
+// contract and call Run; a provider is not contract-certified merely because
+// its constructor compiles.
+type Witness struct {
+	contract Contract
+}
+
+// NewWitness validates the explicit contract that a provider package test
+// intends to certify. It never supplies provider identity, endpoints, or
+// model defaults.
+func NewWitness(contract Contract) (Witness, error) {
+	if err := ValidateContract(contract); err != nil {
+		return Witness{}, err
+	}
+	return Witness{contract: contract}, nil
+}
+
+// Validate rechecks the witness contract before a provider test runs it.
+func (w Witness) Validate() error { return ValidateContract(w.contract) }
+
+// Run executes the certified provider contract against the supplied fixture.
+func (w Witness) Run(t *testing.T, server *Server) {
+	t.Helper()
+	if err := w.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	Run(t, w.contract, server)
+}
+
 // ValidateContract checks the bounded, explicit inputs needed by Run. It does
 // not perform network I/O or infer an endpoint, credential, or model.
 func ValidateContract(contract Contract) error {
@@ -105,12 +137,19 @@ func ValidateContract(contract Contract) error {
 // capture are owned by the contract runner; callers only use URL and RootCAs
 // when adapting a provider constructor.
 type Server struct {
-	tls       *httptest.Server
-	mu        sync.Mutex
-	requests  []requestRecord
-	mode      fixtureMode
-	redirect  string
-	remaining int
+	tls               *httptest.Server
+	mu                sync.Mutex
+	requests          []requestRecord
+	mode              fixtureMode
+	redirect          string
+	remaining         int
+	streamStarted     chan struct{}
+	streamClosed      chan struct{}
+	streamStart       *sync.Once
+	streamClose       *sync.Once
+	concurrentTarget  int
+	concurrentCount   int
+	concurrentRelease chan struct{}
 }
 
 type fixtureMode uint8
@@ -120,6 +159,8 @@ const (
 	fixtureModeAuthOnce
 	fixtureModeBoundedError
 	fixtureModeRedirect
+	fixtureModeStreamHold
+	fixtureModeConcurrentAuth
 )
 
 type requestRecord struct {
@@ -197,7 +238,29 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	} else if mode == fixtureModeAuthOnce {
 		mode = fixtureModeSuccess
 	}
+	var release chan struct{}
+	if mode == fixtureModeConcurrentAuth {
+		if s.concurrentCount < s.concurrentTarget {
+			s.concurrentCount++
+			release = s.concurrentRelease
+			if s.concurrentCount == s.concurrentTarget {
+				close(s.concurrentRelease)
+			}
+		} else {
+			mode = fixtureModeSuccess
+		}
+	}
+	streamStarted, streamClosed := s.streamStarted, s.streamClosed
+	streamStart, streamClose := s.streamStart, s.streamClose
 	s.mu.Unlock()
+	if release != nil {
+		select {
+		case <-release:
+			mode = fixtureModeAuthOnce
+		case <-r.Context().Done():
+			return
+		}
+	}
 
 	switch mode {
 	case fixtureModeAuthOnce:
@@ -212,9 +275,38 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case fixtureModeRedirect:
 		w.Header().Set("Location", target)
 		w.WriteHeader(http.StatusTemporaryRedirect)
+	case fixtureModeStreamHold:
+		s.writeHeldStream(w, r, record.path, streamStarted, streamClosed, streamStart, streamClose)
 	default:
 		s.writeSuccess(w, r.URL.Path, body)
 	}
+}
+
+func (s *Server) writeHeldStream(w http.ResponseWriter, r *http.Request, path string, started, closed chan struct{}, startOnce, closeOnce *sync.Once) {
+	name, ok := fixtureName(path, true)
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	data, err := fixtureFiles.ReadFile("testdata/" + name)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if boundary := bytes.Index(data, []byte("\n\n")); boundary >= 0 {
+		data = data[:boundary+2]
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = w.Write(data)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	startOnce.Do(func() { close(started) })
+	select {
+	case <-r.Context().Done():
+	case <-time.After(10 * time.Second):
+	}
+	closeOnce.Do(func() { close(closed) })
 }
 
 func (s *Server) writeSuccess(w http.ResponseWriter, path string, body []byte) {
@@ -266,6 +358,13 @@ func (s *Server) reset() {
 	s.mode = fixtureModeSuccess
 	s.redirect = ""
 	s.remaining = 0
+	s.streamStarted = nil
+	s.streamClosed = nil
+	s.streamStart = nil
+	s.streamClose = nil
+	s.concurrentTarget = 0
+	s.concurrentCount = 0
+	s.concurrentRelease = nil
 	s.mu.Unlock()
 }
 
@@ -279,6 +378,55 @@ func (s *Server) setMode(mode fixtureMode, target string) {
 		s.remaining = 0
 	}
 	s.mu.Unlock()
+}
+
+func (s *Server) setStreamHold() {
+	s.mu.Lock()
+	s.mode = fixtureModeStreamHold
+	s.streamStarted = make(chan struct{})
+	s.streamClosed = make(chan struct{})
+	s.streamStart = &sync.Once{}
+	s.streamClose = &sync.Once{}
+	s.mu.Unlock()
+}
+
+func (s *Server) setConcurrentAuth(target int) {
+	s.mu.Lock()
+	s.mode = fixtureModeConcurrentAuth
+	s.concurrentTarget = target
+	s.concurrentCount = 0
+	s.concurrentRelease = make(chan struct{})
+	s.mu.Unlock()
+}
+
+func (s *Server) waitStreamStarted(timeout time.Duration) bool {
+	s.mu.Lock()
+	started := s.streamStarted
+	s.mu.Unlock()
+	if started == nil {
+		return false
+	}
+	select {
+	case <-started:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func (s *Server) waitStreamClosed(timeout time.Duration) bool {
+	s.mu.Lock()
+	closed := s.streamClosed
+	s.mu.Unlock()
+	if closed == nil {
+		return false
+	}
+	select {
+	case <-closed:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func (s *Server) records() []requestRecord {
@@ -402,6 +550,16 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 		return fmt.Errorf("stream request: %w", err)
 	}
 
+	// Streaming non-2xx responses are bounded and sanitized before a reader is
+	// returned, just like Invoke failures.
+	server.reset()
+	server.setMode(fixtureModeBoundedError, "")
+	if _, err := normal.Stream(context.Background(), request); err == nil {
+		return errors.New("stream bounded error: Stream returned nil")
+	} else if err := validateFixtureAPIError(err, http.StatusInternalServerError, "internal_server_error", "fixture-request-id"); err != nil {
+		return fmt.Errorf("stream bounded error: %w", err)
+	}
+
 	// A request Model that changes the bound endpoint must fail before any wire
 	// request. This checks exact endpoint pinning independently of redirects.
 	server.reset()
@@ -464,6 +622,19 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 	if got := targetCalls(); got != 0 {
 		return fmt.Errorf("redirect target received %d requests", got)
 	}
+	server.setMode(fixtureModeRedirect, redirectTarget.URL)
+	if _, err := redirectClient.Stream(context.Background(), request); err == nil {
+		return errors.New("stream redirect rejection: Stream returned nil")
+	} else if err := validateFixtureAPIError(err, http.StatusTemporaryRedirect, "", ""); err != nil {
+		return fmt.Errorf("stream redirect rejection: %w", err)
+	}
+	if got := targetCalls(); got != 0 {
+		return fmt.Errorf("stream redirect target received %d requests", got)
+	}
+
+	if err := exerciseStreamLifecycle(contract, selected, descriptor, server, request); err != nil {
+		return err
+	}
 
 	// One logical call may perform one recovery wire attempt, but must account
 	// for exactly one invalidation/acquire pair. Invoke and Stream each get their
@@ -495,6 +666,109 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 	gets, invalidates = recoverySource.counts()
 	if gets != 4 || invalidates != 2 {
 		return fmt.Errorf("stream recovery accounting = acquires %d/invalidate %d, want 4/2", gets, invalidates)
+	}
+
+	// Concurrent initial auth failures share one generation invalidation. Every
+	// logical call gets at most one recovery wire attempt, with no unbounded
+	// retry fan-out.
+	const concurrentCalls = 8
+	server.reset()
+	concurrentClient, concurrentSource, err := constructTracked(contract, selected, descriptor, server)
+	if err != nil {
+		return fmt.Errorf("concurrent recovery constructor: %w", err)
+	}
+	defer concurrentSource.Close()
+	server.setConcurrentAuth(concurrentCalls)
+	start := make(chan struct{})
+	results := make(chan error, concurrentCalls)
+	for i := 0; i < concurrentCalls; i++ {
+		go func() {
+			<-start
+			_, callErr := concurrentClient.Invoke(context.Background(), request)
+			results <- callErr
+		}()
+	}
+	close(start)
+	for i := 0; i < concurrentCalls; i++ {
+		if callErr := <-results; callErr != nil {
+			return fmt.Errorf("concurrent recovery call: %w", callErr)
+		}
+	}
+	gets, invalidates = concurrentSource.counts()
+	if gets != concurrentCalls*2 || invalidates != 1 {
+		return fmt.Errorf("concurrent recovery accounting = acquires %d/invalidate %d, want %d/1", gets, invalidates, concurrentCalls*2)
+	}
+	if got, want := len(server.records()), concurrentCalls*2; got != want {
+		return fmt.Errorf("concurrent recovery wire requests = %d, want %d", got, want)
+	}
+	return nil
+}
+
+func validateFixtureAPIError(err error, status int, code, requestID string) error {
+	var apiErr *failure.APIError
+	if !errors.As(err, &apiErr) {
+		return fmt.Errorf("error = %T, want sanitized APIError", err)
+	}
+	if apiErr.Status != status || code != "" && apiErr.Code != code || requestID != "" && apiErr.RequestID != requestID || strings.Contains(err.Error(), "fixture-provider-secret") {
+		return fmt.Errorf("error leaked or had wrong fields: %v", err)
+	}
+	return nil
+}
+
+func exerciseStreamLifecycle(contract Contract, selected model.Model, descriptor credentials.Descriptor, server *Server, request inference.Request) error {
+	client, source, err := constructTracked(contract, selected, descriptor, server)
+	if err != nil {
+		return fmt.Errorf("stream cancellation constructor: %w", err)
+	}
+	defer source.Close()
+	server.reset()
+	server.setStreamHold()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, err := client.Stream(ctx, request)
+	if err != nil {
+		return fmt.Errorf("stream cancellation open: %w", err)
+	}
+	if !server.waitStreamStarted(2 * time.Second) {
+		_ = reader.Close()
+		return errors.New("stream cancellation fixture did not start")
+	}
+	cancel()
+	_ = reader.Close()
+	if !server.waitStreamClosed(2 * time.Second) {
+		return errors.New("stream cancellation did not close response body")
+	}
+
+	client, source, err = constructTracked(contract, selected, descriptor, server)
+	if err != nil {
+		return fmt.Errorf("early-close constructor: %w", err)
+	}
+	defer source.Close()
+	server.reset()
+	server.setStreamHold()
+	reader, err = client.Stream(context.Background(), request)
+	if err != nil {
+		return fmt.Errorf("early-close open: %w", err)
+	}
+	if !server.waitStreamStarted(2 * time.Second) {
+		_ = reader.Close()
+		return errors.New("early-close fixture did not start")
+	}
+	nextDone := make(chan error, 1)
+	go func() {
+		_, nextErr := reader.Next()
+		nextDone <- nextErr
+	}()
+	if err := reader.Close(); err != nil {
+		return fmt.Errorf("early-close Close: %w", err)
+	}
+	if !server.waitStreamClosed(2 * time.Second) {
+		return errors.New("early-close did not close response body")
+	}
+	select {
+	case <-nextDone:
+	case <-time.After(2 * time.Second):
+		return errors.New("early-close left blocked StreamReader.Next")
 	}
 	return nil
 }
