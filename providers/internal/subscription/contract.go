@@ -137,19 +137,23 @@ func ValidateContract(contract Contract) error {
 // capture are owned by the contract runner; callers only use URL and RootCAs
 // when adapting a provider constructor.
 type Server struct {
-	tls               *httptest.Server
-	mu                sync.Mutex
-	requests          []requestRecord
-	mode              fixtureMode
-	redirect          string
-	remaining         int
-	streamStarted     chan struct{}
-	streamClosed      chan struct{}
-	streamStart       *sync.Once
-	streamClose       *sync.Once
-	concurrentTarget  int
-	concurrentCount   int
-	concurrentRelease chan struct{}
+	tls                 *httptest.Server
+	mu                  sync.Mutex
+	requests            []requestRecord
+	mode                fixtureMode
+	redirect            string
+	remaining           int
+	streamStarted       chan struct{}
+	streamClosed        chan struct{}
+	streamStart         *sync.Once
+	streamClose         *sync.Once
+	concurrentTarget    int
+	concurrentCount     int
+	concurrentRelease   chan struct{}
+	concurrentAbort     chan struct{}
+	concurrentAbortOnce *sync.Once
+	errorBodyClosed     chan struct{}
+	errorBodyCloseOnce  *sync.Once
 }
 
 type fixtureMode uint8
@@ -158,6 +162,7 @@ const (
 	fixtureModeSuccess fixtureMode = iota
 	fixtureModeAuthOnce
 	fixtureModeBoundedError
+	fixtureModeTrackedError
 	fixtureModeRedirect
 	fixtureModeStreamHold
 	fixtureModeConcurrentAuth
@@ -252,12 +257,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	streamStarted, streamClosed := s.streamStarted, s.streamClosed
 	streamStart, streamClose := s.streamStart, s.streamClose
+	concurrentAbort := s.concurrentAbort
 	s.mu.Unlock()
 	if release != nil {
 		select {
 		case <-release:
 			mode = fixtureModeAuthOnce
+		case <-concurrentAbort:
+			return
 		case <-r.Context().Done():
+			s.abortConcurrent()
 			return
 		}
 	}
@@ -272,6 +281,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-ID", "fixture-request-id")
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"error":{"code":"internal_server_error","message":"fixture-provider-secret"}}`+strings.Repeat(" ", 128<<10))
+	case fixtureModeTrackedError:
+		s.writeTrackedError(w, r)
 	case fixtureModeRedirect:
 		w.Header().Set("Location", target)
 		w.WriteHeader(http.StatusTemporaryRedirect)
@@ -279,6 +290,32 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.writeHeldStream(w, r, record.path, streamStarted, streamClosed, streamStart, streamClose)
 	default:
 		s.writeSuccess(w, r.URL.Path, body)
+	}
+}
+
+func (s *Server) writeTrackedError(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", "fixture-request-id")
+	w.WriteHeader(http.StatusInternalServerError)
+	data := []byte(`{"error":{"code":"internal_server_error","message":"fixture-provider-secret"}}` + strings.Repeat(" ", 64<<10+1024))
+	for len(data) > 0 {
+		chunk := data
+		if len(chunk) > 4096 {
+			chunk = chunk[:4096]
+		}
+		if _, err := w.Write(chunk); err != nil {
+			s.closeErrorBody()
+			return
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		data = data[len(chunk):]
+	}
+	select {
+	case <-r.Context().Done():
+		s.closeErrorBody()
+	case <-time.After(2 * time.Second):
 	}
 }
 
@@ -365,6 +402,10 @@ func (s *Server) reset() {
 	s.concurrentTarget = 0
 	s.concurrentCount = 0
 	s.concurrentRelease = nil
+	s.concurrentAbort = nil
+	s.concurrentAbortOnce = nil
+	s.errorBodyClosed = nil
+	s.errorBodyCloseOnce = nil
 	s.mu.Unlock()
 }
 
@@ -390,13 +431,56 @@ func (s *Server) setStreamHold() {
 	s.mu.Unlock()
 }
 
+func (s *Server) setTrackedError() {
+	s.mu.Lock()
+	s.mode = fixtureModeTrackedError
+	s.errorBodyClosed = make(chan struct{})
+	s.errorBodyCloseOnce = &sync.Once{}
+	s.mu.Unlock()
+}
+
+func (s *Server) closeErrorBody() {
+	s.mu.Lock()
+	closed, once := s.errorBodyClosed, s.errorBodyCloseOnce
+	s.mu.Unlock()
+	if closed != nil && once != nil {
+		once.Do(func() { close(closed) })
+	}
+}
+
+func (s *Server) waitErrorBodyClosed(timeout time.Duration) bool {
+	s.mu.Lock()
+	closed := s.errorBodyClosed
+	s.mu.Unlock()
+	if closed == nil {
+		return false
+	}
+	select {
+	case <-closed:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func (s *Server) setConcurrentAuth(target int) {
 	s.mu.Lock()
 	s.mode = fixtureModeConcurrentAuth
 	s.concurrentTarget = target
 	s.concurrentCount = 0
 	s.concurrentRelease = make(chan struct{})
+	s.concurrentAbort = make(chan struct{})
+	s.concurrentAbortOnce = &sync.Once{}
 	s.mu.Unlock()
+}
+
+func (s *Server) abortConcurrent() {
+	s.mu.Lock()
+	abort, once := s.concurrentAbort, s.concurrentAbortOnce
+	s.mu.Unlock()
+	if abort != nil && once != nil {
+		once.Do(func() { close(abort) })
+	}
 }
 
 func (s *Server) waitStreamStarted(timeout time.Duration) bool {
@@ -599,6 +683,26 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 			return fmt.Errorf("bounded error leaked or had wrong status: %v", err)
 		}
 	}
+	server.reset()
+	server.setTrackedError()
+	if _, err := errorClient.Invoke(context.Background(), request); err == nil {
+		return errors.New("tracked Invoke error: Invoke returned nil")
+	} else if err := validateFixtureAPIError(err, http.StatusInternalServerError, "internal_server_error", "fixture-request-id"); err != nil {
+		return fmt.Errorf("tracked Invoke error: %w", err)
+	}
+	if !server.waitErrorBodyClosed(2 * time.Second) {
+		return errors.New("tracked Invoke error body was not closed")
+	}
+	server.reset()
+	server.setTrackedError()
+	if _, err := errorClient.Stream(context.Background(), request); err == nil {
+		return errors.New("tracked Stream error: Stream returned nil")
+	} else if err := validateFixtureAPIError(err, http.StatusInternalServerError, "internal_server_error", "fixture-request-id"); err != nil {
+		return fmt.Errorf("tracked Stream error: %w", err)
+	}
+	if !server.waitErrorBodyClosed(2 * time.Second) {
+		return errors.New("tracked Stream error body was not closed")
+	}
 
 	// Redirects are surfaced as a bounded APIError; no credential-bearing
 	// request may follow the Location to another origin.
@@ -679,19 +783,28 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 	}
 	defer concurrentSource.Close()
 	server.setConcurrentAuth(concurrentCalls)
+	concurrentCtx, concurrentCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer concurrentCancel()
 	start := make(chan struct{})
 	results := make(chan error, concurrentCalls)
 	for i := 0; i < concurrentCalls; i++ {
 		go func() {
 			<-start
-			_, callErr := concurrentClient.Invoke(context.Background(), request)
+			_, callErr := concurrentClient.Invoke(concurrentCtx, request)
 			results <- callErr
 		}()
 	}
 	close(start)
 	for i := 0; i < concurrentCalls; i++ {
-		if callErr := <-results; callErr != nil {
-			return fmt.Errorf("concurrent recovery call: %w", callErr)
+		select {
+		case callErr := <-results:
+			if callErr != nil {
+				concurrentCancel()
+				return fmt.Errorf("concurrent recovery call: %w", callErr)
+			}
+		case <-concurrentCtx.Done():
+			concurrentCancel()
+			return fmt.Errorf("concurrent recovery deadline: %w", concurrentCtx.Err())
 		}
 	}
 	gets, invalidates = concurrentSource.counts()

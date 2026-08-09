@@ -118,6 +118,87 @@ func TestClientInvalidatesAndReacquiresOnceForRefreshableAuthFailure(t *testing.
 	}
 }
 
+func TestInvalidateOnceCanceledLeaderIsRemovedForLaterRetry(t *testing.T) {
+	t.Parallel()
+
+	generation := mustGeneration(t, "cancel-leader")
+	source := newCoordinationSource(testDescriptor(testPolicy().Accepted[0]))
+	started := make(chan struct{})
+	source.wait[generation] = started
+	source.started[generation] = make(chan struct{})
+	client := &Client{source: source}
+	ctx, cancel := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		leaderErr <- client.invalidateOnce(ctx, generation, credentials.FailureAuthExpired)
+	}()
+	<-source.started[generation]
+	cancel()
+	if err := <-leaderErr; err == nil {
+		t.Fatal("canceled leader error = nil, want cancellation")
+	}
+	delete(source.wait, generation)
+	if err := client.invalidateOnce(context.Background(), generation, credentials.FailureAuthExpired); err != nil {
+		t.Fatalf("later healthy invalidation = %v, want success", err)
+	}
+	if got := source.invalidateCount(generation); got != 2 {
+		t.Fatalf("generation invalidation count = %d, want failed leader plus later retry", got)
+	}
+}
+
+func TestInvalidateOnceTransientFailureThenSuccess(t *testing.T) {
+	t.Parallel()
+
+	generation := mustGeneration(t, "transient")
+	source := newCoordinationSource(testDescriptor(testPolicy().Accepted[0]))
+	source.errs[generation] = []error{errors.New("temporary fixture failure"), nil}
+	client := &Client{source: source}
+	if err := client.invalidateOnce(context.Background(), generation, credentials.FailureAuthExpired); err == nil {
+		t.Fatal("first invalidation error = nil, want transient failure")
+	}
+	if err := client.invalidateOnce(context.Background(), generation, credentials.FailureAuthExpired); err != nil {
+		t.Fatalf("second invalidation = %v, want success", err)
+	}
+	if got := source.invalidateCount(generation); got != 2 {
+		t.Fatalf("generation invalidation count = %d, want 2", got)
+	}
+}
+
+func TestInvalidateOnceAllowsOverlappingGenerationsAndPrunesAfterAcquire(t *testing.T) {
+	t.Parallel()
+
+	first := mustGeneration(t, "overlap-one")
+	second := mustGeneration(t, "overlap-two")
+	newer := mustGeneration(t, "overlap-new")
+	source := newCoordinationSource(testDescriptor(testPolicy().Accepted[0]))
+	firstRelease := make(chan struct{})
+	secondRelease := make(chan struct{})
+	source.wait[first] = firstRelease
+	source.wait[second] = secondRelease
+	source.started[first] = make(chan struct{})
+	source.started[second] = make(chan struct{})
+	client := &Client{source: source}
+	results := make(chan error, 2)
+	go func() { results <- client.invalidateOnce(context.Background(), first, credentials.FailureAuthExpired) }()
+	go func() { results <- client.invalidateOnce(context.Background(), second, credentials.FailureAuthExpired) }()
+	<-source.started[first]
+	<-source.started[second]
+	close(firstRelease)
+	close(secondRelease)
+	if err := <-results; err != nil {
+		t.Fatalf("first overlapping invalidation = %v", err)
+	}
+	if err := <-results; err != nil {
+		t.Fatalf("second overlapping invalidation = %v", err)
+	}
+	client.observeGeneration(newer)
+	client.recoveryMu.Lock()
+	defer client.recoveryMu.Unlock()
+	if len(client.recovery) != 0 {
+		t.Fatalf("successful recovery entries after newer generation = %d, want 0", len(client.recovery))
+	}
+}
+
 func TestClientDoesNotResetOuterBudgetAfterRecoveryFailure(t *testing.T) {
 	t.Parallel()
 
@@ -297,6 +378,67 @@ type fakeSource struct {
 	acquires    int
 	invalidates int
 	invalidated credentials.Generation
+}
+
+type coordinationSource struct {
+	mu          sync.Mutex
+	descriptor  credentials.Descriptor
+	wait        map[credentials.Generation]chan struct{}
+	started     map[credentials.Generation]chan struct{}
+	startedDone map[credentials.Generation]bool
+	errs        map[credentials.Generation][]error
+	invalidates map[credentials.Generation]int
+}
+
+func newCoordinationSource(descriptor credentials.Descriptor) *coordinationSource {
+	return &coordinationSource{
+		descriptor:  descriptor,
+		wait:        make(map[credentials.Generation]chan struct{}),
+		started:     make(map[credentials.Generation]chan struct{}),
+		startedDone: make(map[credentials.Generation]bool),
+		errs:        make(map[credentials.Generation][]error),
+		invalidates: make(map[credentials.Generation]int),
+	}
+}
+
+func (s *coordinationSource) Reference() credentials.Reference   { return credentials.Reference{} }
+func (s *coordinationSource) Descriptor() credentials.Descriptor { return s.descriptor }
+func (s *coordinationSource) Acquire(context.Context) (credentials.Lease, error) {
+	return nil, errors.New("coordination source does not acquire")
+}
+func (s *coordinationSource) Invalidate(ctx context.Context, generation credentials.Generation, _ credentials.Failure) error {
+	s.mu.Lock()
+	s.invalidates[generation]++
+	started := s.started[generation]
+	if started == nil {
+		started = make(chan struct{})
+		s.started[generation] = started
+	}
+	if !s.startedDone[generation] {
+		close(started)
+		s.startedDone[generation] = true
+	}
+	wait := s.wait[generation]
+	var err error
+	if queued := s.errs[generation]; len(queued) > 0 {
+		err = queued[0]
+		s.errs[generation] = queued[1:]
+	}
+	s.mu.Unlock()
+	if wait != nil {
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return err
+}
+func (s *coordinationSource) Close() error { return nil }
+func (s *coordinationSource) invalidateCount(generation credentials.Generation) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalidates[generation]
 }
 
 func (s *fakeSource) CanRecover(credentials.Failure) bool { return s.recoverable }

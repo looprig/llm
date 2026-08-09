@@ -45,7 +45,8 @@ type Client struct {
 	sourceBinding credentials.Descriptor
 	allowLegacy   bool
 	recoveryMu    sync.Mutex
-	recovery      *recoveryState
+	recovery      map[credentials.Generation]*recoveryState
+	observed      []credentials.Generation
 }
 
 type recoveryState struct {
@@ -112,7 +113,7 @@ func newClient(inner inference.Client, source credentials.Source, policy llm.Aut
 		return nil, &ConstructionError{Reason: "inner client does not support call-scoped authorization"}
 	}
 	policy.Accepted = append([]llm.AuthBinding(nil), policy.Accepted...)
-	return &Client{inner: inner, source: source, policy: policy, sourceBinding: sourceBinding, allowLegacy: allowLegacy}, nil
+	return &Client{inner: inner, source: source, policy: policy, sourceBinding: sourceBinding, allowLegacy: allowLegacy, recovery: make(map[credentials.Generation]*recoveryState)}, nil
 }
 
 // Invoke acquires and verifies one lease before every initial/recovery wire
@@ -208,7 +209,10 @@ func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.Str
 // perform their own single bounded recovery acquisition/wire attempt.
 func (c *Client) invalidateOnce(ctx context.Context, generation credentials.Generation, failure credentials.Failure) error {
 	c.recoveryMu.Lock()
-	if current := c.recovery; current != nil && current.generation == generation {
+	if c.recovery == nil {
+		c.recovery = make(map[credentials.Generation]*recoveryState)
+	}
+	if current := c.recovery[generation]; current != nil {
 		done := current.done
 		c.recoveryMu.Unlock()
 		select {
@@ -222,12 +226,18 @@ func (c *Client) invalidateOnce(ctx context.Context, generation credentials.Gene
 		}
 	}
 	state := &recoveryState{generation: generation, done: make(chan struct{})}
-	c.recovery = state
+	c.recovery[generation] = state
 	c.recoveryMu.Unlock()
 
-	state.err = c.source.Invalidate(ctx, generation, failure)
+	err := c.source.Invalidate(ctx, generation, failure)
+	c.recoveryMu.Lock()
+	state.err = err
+	if err != nil {
+		delete(c.recovery, generation)
+	}
 	close(state.done)
-	return state.err
+	c.recoveryMu.Unlock()
+	return err
 }
 
 func (c *Client) authorizer(lease credentials.Lease) httpauth.Authorizer {
@@ -301,10 +311,47 @@ func (c *Client) acquire(ctx context.Context) (credentials.Lease, error) {
 	if err := lease.Generation().Validate(); err != nil {
 		return nil, &LeaseError{Reason: "credential source returned an invalid generation"}
 	}
+	c.observeGeneration(lease.Generation())
 	if isNil(lease.Authorizer()) {
 		return nil, &LeaseError{Reason: "credential source returned a nil authorizer"}
 	}
 	return lease, nil
+}
+
+// observeGeneration prunes completed successful invalidations from older
+// generations when a newer lease is observed. In-flight entries remain until
+// their waiters are notified; the table retains only a small recent generation
+// window, plus active overlaps, never entries proportional to call count.
+func (c *Client) observeGeneration(generation credentials.Generation) {
+	c.recoveryMu.Lock()
+	defer c.recoveryMu.Unlock()
+	if len(c.observed) == 0 || c.observed[len(c.observed)-1] != generation {
+		c.observed = append(c.observed, generation)
+		if len(c.observed) > 3 {
+			c.observed = c.observed[len(c.observed)-3:]
+		}
+	}
+	for key, state := range c.recovery {
+		if key == generation {
+			continue
+		}
+		select {
+		case <-state.done:
+			if state.err == nil && !containsGeneration(c.observed, key) {
+				delete(c.recovery, key)
+			}
+		default:
+		}
+	}
+}
+
+func containsGeneration(generations []credentials.Generation, wanted credentials.Generation) bool {
+	for _, generation := range generations {
+		if generation == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 type renewableSource interface {
