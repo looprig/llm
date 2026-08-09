@@ -153,6 +153,10 @@ github.com/invopop/jsonschema
 # github.com/looprig/core v0.5.0 => ../core
 ## explicit; go 1.25.8
 github.com/looprig/core/content
+# github.com/looprig/credentials v0.0.0 => ../credentials
+## explicit; go 1.26.4
+github.com/looprig/credentials
+github.com/looprig/credentials/httpauth
 # github.com/looprig/inference v0.8.0 => ../inference
 ## explicit; go 1.26.4
 github.com/looprig/inference
@@ -175,6 +179,9 @@ github.com/looprig/inference/usage
 github.com/looprig/inference/wire/eventstream
 github.com/looprig/inference/wire/jsonbody
 github.com/looprig/inference/wire/sse
+# github.com/looprig/secrets v0.0.0 => ../secrets
+## explicit; go 1.26.4
+github.com/looprig/secrets
 # github.com/openai/openai-go/v3 v3.50.0
 ## explicit; go 1.25.0
 github.com/openai/openai-go/v3
@@ -719,4 +726,6 @@ honnef.co/go/tools/stylecheck/st1022
 honnef.co/go/tools/stylecheck/st1023
 honnef.co/go/tools/unused
 # github.com/looprig/core => ../core
+# github.com/looprig/credentials => ../credentials
 # github.com/looprig/inference => ../inference
+# github.com/looprig/secrets => ../secrets

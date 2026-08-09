@@ -1,0 +1,444 @@
+// Package credentialclient adapts a credentials.Source to the call-scoped
+// authorization seam exposed by inference transports. It owns provider policy
+// checks, lease acquisition, provider auth-failure classification, and the
+// bounded recovery exchange; the low-level transport only authorizes and sends.
+package credentialclient
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/looprig/core/content"
+	"github.com/looprig/credentials"
+	"github.com/looprig/credentials/httpauth"
+	"github.com/looprig/inference"
+	"github.com/looprig/inference/failure"
+	"github.com/looprig/inference/stream"
+	"github.com/looprig/llm"
+)
+
+// InvokeWithAuth and StreamWithAuth are the additive call-scoped methods on
+// inference transports. Keeping these small local interfaces lets provider
+// clients retain the legacy inference.Client surface while the adapter supplies
+// a fresh lease for each concrete wire attempt.
+type invokeWithAuth interface {
+	InvokeWithAuth(context.Context, inference.Request, httpauth.Authorizer) (*inference.Response, error)
+}
+
+type streamWithAuth interface {
+	StreamWithAuth(context.Context, inference.Request, httpauth.Authorizer) (*stream.StreamReader[content.Chunk], error)
+}
+
+// Client is a provider-bound source adapter. It is safe for concurrent use:
+// source and inner are immutable references, and all per-call state is local.
+type Client struct {
+	inner         inference.Client
+	source        credentials.Source
+	policy        llm.AuthPolicy
+	sourceBinding credentials.Descriptor
+	allowLegacy   bool
+}
+
+// New binds source to inner under one exact policy. A nil source is never
+// interpreted as unauthenticated; callers must pass credentials.NewNoneSource
+// for an explicitly local/no-credential transport. A legacy-only inner client
+// is rejected because using its default authenticator would bypass the source.
+func New(inner inference.Client, source credentials.Source, policy llm.AuthPolicy) (inference.Client, error) {
+	return newClient(inner, source, policy, false)
+}
+
+// ValidateSource performs the construction-time source and exact-policy
+// checks without allocating a transport. Composition roots can call it before
+// dispatch so a nil or mismatched source cannot even construct a provider
+// network object.
+func ValidateSource(source credentials.Source, policy llm.AuthPolicy) error {
+	if isNil(source) {
+		return &ConstructionError{Reason: "credential source is nil; pass an explicit NoneSource for local transport"}
+	}
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	return policy.Match(source.Descriptor())
+}
+
+// SupportsCallScoped reports whether an inference client exposes at least one
+// additive call-scoped authorization method. It is used by composition roots
+// to keep legacy concrete clients source-compatible while ensuring every
+// transport that can consume leases is wrapped by Client.
+func SupportsCallScoped(inner inference.Client) bool {
+	if isNil(inner) {
+		return false
+	}
+	_, invokeOK := inner.(invokeWithAuth)
+	_, streamOK := inner.(streamWithAuth)
+	return invokeOK || streamOK
+}
+
+// NewLegacyCompatible is the narrow compatibility escape hatch for old
+// provider clients that predate call-scoped transport methods. It is permitted
+// only for an immutable StaticSource created by auto.New; dynamic sources must
+// use New and are rejected rather than silently bypassing lease authorization.
+func NewLegacyCompatible(inner inference.Client, source credentials.Source, policy llm.AuthPolicy) (inference.Client, error) {
+	if _, ok := source.(*StaticSource); !ok {
+		return New(inner, source, policy)
+	}
+	return newClient(inner, source, policy, true)
+}
+
+func newClient(inner inference.Client, source credentials.Source, policy llm.AuthPolicy, allowLegacy bool) (inference.Client, error) {
+	if isNil(inner) {
+		return nil, &ConstructionError{Reason: "inner inference client is nil"}
+	}
+	if err := ValidateSource(source, policy); err != nil {
+		return nil, err
+	}
+	sourceBinding := source.Descriptor()
+	if !SupportsCallScoped(inner) && !allowLegacy {
+		return nil, &ConstructionError{Reason: "inner client does not support call-scoped authorization"}
+	}
+	policy.Accepted = append([]llm.AuthBinding(nil), policy.Accepted...)
+	return &Client{inner: inner, source: source, policy: policy, sourceBinding: sourceBinding, allowLegacy: allowLegacy}, nil
+}
+
+// Invoke acquires and verifies one lease before every initial/recovery wire
+// attempt. Authentication recovery is deliberately bounded to one extra wire
+// attempt and never implements or resets an outer inference retry budget.
+func (c *Client) Invoke(ctx context.Context, req inference.Request) (*inference.Response, error) {
+	if c == nil {
+		return nil, &ConstructionError{Reason: "credential client is nil"}
+	}
+	if ctx == nil {
+		return nil, errors.New("llm: nil invocation context")
+	}
+	invoker, ok := c.inner.(invokeWithAuth)
+	if !ok && !c.allowLegacy {
+		return nil, &ConstructionError{Reason: "inner client does not support call-scoped invocation"}
+	}
+	lease, err := c.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var response *inference.Response
+	if ok {
+		response, err = invoker.InvokeWithAuth(ctx, req, lease.Authorizer())
+	} else {
+		response, err = c.inner.Invoke(ctx, req)
+	}
+	if !ok {
+		return response, err
+	}
+	if !isRefreshableAuthFailure(err) {
+		return response, err
+	}
+	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), classifyAuthFailure(err)); invalidateErr != nil {
+		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
+	}
+	// Exactly one recovery acquisition and one recovery wire exchange. No loop
+	// here is intentional: ordinary retry policy belongs outside this adapter.
+	recoveryLease, acquireErr := c.acquire(ctx)
+	if acquireErr != nil {
+		return nil, acquireErr
+	}
+	return invoker.InvokeWithAuth(ctx, req, recoveryLease.Authorizer())
+}
+
+// Stream follows the same lease/recovery contract as Invoke. If a failed
+// streaming call returned a reader alongside an error, close it before recovery
+// so no body/connection is leaked.
+func (c *Client) Stream(ctx context.Context, req inference.Request) (*stream.StreamReader[content.Chunk], error) {
+	if c == nil {
+		return nil, &ConstructionError{Reason: "credential client is nil"}
+	}
+	if ctx == nil {
+		return nil, errors.New("llm: nil streaming context")
+	}
+	streamer, ok := c.inner.(streamWithAuth)
+	if !ok && !c.allowLegacy {
+		return nil, &ConstructionError{Reason: "inner client does not support call-scoped streaming"}
+	}
+	lease, err := c.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var reader *stream.StreamReader[content.Chunk]
+	if ok {
+		reader, err = streamer.StreamWithAuth(ctx, req, lease.Authorizer())
+	} else {
+		reader, err = c.inner.Stream(ctx, req)
+	}
+	if !ok {
+		return reader, err
+	}
+	if !isRefreshableAuthFailure(err) {
+		return reader, err
+	}
+	if reader != nil {
+		_ = reader.Close()
+	}
+	if invalidateErr := c.source.Invalidate(ctx, lease.Generation(), classifyAuthFailure(err)); invalidateErr != nil {
+		return nil, &RecoveryError{Stage: "invalidate", Err: invalidateErr}
+	}
+	recoveryLease, acquireErr := c.acquire(ctx)
+	if acquireErr != nil {
+		return nil, acquireErr
+	}
+	return streamer.StreamWithAuth(ctx, req, recoveryLease.Authorizer())
+}
+
+func (c *Client) acquire(ctx context.Context) (credentials.Lease, error) {
+	lease, err := c.source.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if isNil(lease) {
+		return nil, &LeaseError{Reason: "credential source returned a nil lease"}
+	}
+	leaseDescriptor := lease.Descriptor()
+	if err := c.policy.Match(leaseDescriptor); err != nil {
+		return nil, err
+	}
+	if !sameBinding(c.sourceBinding, leaseDescriptor) {
+		return nil, &LeaseError{Reason: "credential source lease identity changed after construction"}
+	}
+	if err := lease.Generation().Validate(); err != nil {
+		return nil, &LeaseError{Reason: "credential source returned an invalid generation"}
+	}
+	if isNil(lease.Authorizer()) {
+		return nil, &LeaseError{Reason: "credential source returned a nil authorizer"}
+	}
+	return lease, nil
+}
+
+func isRefreshableAuthFailure(err error) bool {
+	_, ok := ClassifyAuthFailure(err)
+	return ok
+}
+
+// ClassifyAuthFailure maps bounded provider errors into the closed credentials
+// failure classes. Only explicit authentication codes can trigger a refresh;
+// malformed requests, permission denials, quota, and rate limits cannot.
+func ClassifyAuthFailure(err error) (credentials.Failure, bool) {
+	if err == nil {
+		return "", false
+	}
+	var apiErr *failure.APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return "", false
+	}
+	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+	if code == "" {
+		code = strings.ToLower(strings.TrimSpace(apiErr.ProviderCode))
+	}
+	switch code {
+	case "", "unauthorized", "unauthenticated", "authentication_error", "invalid_api_key":
+		if apiErr.Status == 401 || (apiErr.Status == 403 && code != "") {
+			return classifyAuthFailure(err), true
+		}
+	}
+	return "", false
+}
+
+func sameBinding(left, right credentials.Descriptor) bool {
+	return left.Provider == right.Provider && left.Transport == right.Transport &&
+		left.Scheme == right.Scheme && left.Usage == right.Usage &&
+		left.Issuer == right.Issuer && left.Audience == right.Audience
+}
+
+func classifyAuthFailure(err error) credentials.Failure {
+	var apiErr *failure.APIError
+	if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == 401 {
+		code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+		if code == "" {
+			code = strings.ToLower(strings.TrimSpace(apiErr.ProviderCode))
+		}
+		if code == "invalid_api_key" || code == "authentication_error" {
+			return credentials.FailureAuthRejected
+		}
+		return credentials.FailureAuthExpired
+	}
+	return credentials.FailureAuthRejected
+}
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+// ConstructionError reports fail-closed adapter construction failures.
+type ConstructionError struct{ Reason string }
+
+func (e *ConstructionError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "llm: credential client construction failed"
+	}
+	return "llm: credential client construction failed: " + e.Reason
+}
+
+// LeaseError reports an invalid source lease before any authorization or I/O.
+type LeaseError struct{ Reason string }
+
+func (e *LeaseError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "llm: invalid credential lease"
+	}
+	return "llm: invalid credential lease: " + e.Reason
+}
+
+// RecoveryError reports a safe source recovery boundary failure.
+type RecoveryError struct {
+	Stage string
+	Err   error
+}
+
+func (e *RecoveryError) Error() string {
+	if e == nil {
+		return "llm: credential recovery failed"
+	}
+	if e.Err == nil {
+		return "llm: credential recovery failed at " + e.Stage
+	}
+	return "llm: credential recovery failed at " + e.Stage + ": " + e.Err.Error()
+}
+
+func (e *RecoveryError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// StaticSource is an immutable in-memory source used solely by the legacy
+// API-key compatibility wrapper. It has a real descriptor and generation so it
+// still passes the same exact policy and per-lease checks as a dynamic source.
+type StaticSource struct {
+	descriptor credentials.Descriptor
+	reference  credentials.Reference
+	generation credentials.Generation
+	authorizer httpauth.Authorizer
+
+	mu     sync.RWMutex
+	closed bool
+}
+
+// NewStaticSource constructs a source around one already-built HTTP authorizer.
+// The binding's scheme/usage/authority metadata is validated before the source
+// can be used.
+func NewStaticSource(binding llm.AuthBinding, authorizer httpauth.Authorizer) (*StaticSource, error) {
+	if isNil(authorizer) {
+		return nil, &ConstructionError{Reason: "static source authorizer is nil"}
+	}
+	descriptor, err := binding.Descriptor()
+	if err != nil {
+		return nil, err
+	}
+	if descriptor.Scheme != credentials.SchemeAPIKey {
+		return nil, &ConstructionError{Reason: "static source requires api_key scheme"}
+	}
+	reference, err := credentials.NewReference(binding.Provider, "inline")
+	if err != nil {
+		return nil, err
+	}
+	generation, err := credentials.NewGeneration("static")
+	if err != nil {
+		return nil, err
+	}
+	return &StaticSource{descriptor: descriptor, reference: reference, generation: generation, authorizer: authorizer}, nil
+}
+
+func (s *StaticSource) Reference() credentials.Reference {
+	if s == nil {
+		return credentials.Reference{}
+	}
+	return s.reference
+}
+
+func (s *StaticSource) Descriptor() credentials.Descriptor {
+	if s == nil {
+		return credentials.Descriptor{}
+	}
+	return s.descriptor
+}
+
+func (s *StaticSource) Acquire(ctx context.Context) (credentials.Lease, error) {
+	if ctx == nil {
+		return nil, errors.New("llm: nil acquisition context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, &credentials.SourceClosedError{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, &credentials.SourceClosedError{}
+	}
+	return staticLease{generation: s.generation, descriptor: s.descriptor, authorizer: s.authorizer}, nil
+}
+
+func (s *StaticSource) Invalidate(ctx context.Context, generation credentials.Generation, failureClass credentials.Failure) error {
+	if ctx == nil {
+		return errors.New("llm: nil invalidation context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := generation.Validate(); err != nil {
+		return err
+	}
+	if err := failureClass.Validate(); err != nil {
+		return err
+	}
+	if s == nil {
+		return &credentials.SourceClosedError{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return &credentials.SourceClosedError{}
+	}
+	// Static key values cannot refresh themselves. Matching and stale
+	// generations are nevertheless accepted as a no-op so a late response never
+	// mutates a future source generation.
+	return nil
+}
+
+func (s *StaticSource) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	return nil
+}
+
+type staticLease struct {
+	generation credentials.Generation
+	descriptor credentials.Descriptor
+	authorizer httpauth.Authorizer
+}
+
+func (l staticLease) Generation() credentials.Generation { return l.generation }
+func (l staticLease) Descriptor() credentials.Descriptor { return l.descriptor }
+func (l staticLease) ExpiresAt() time.Time               { return time.Time{} }
+func (l staticLease) Authorizer() httpauth.Authorizer    { return l.authorizer }
+
+// Compile-time assertions for the adapter's public contract.
+var (
+	_ inference.Client   = (*Client)(nil)
+	_ credentials.Source = (*StaticSource)(nil)
+)

@@ -145,3 +145,11 @@ func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 		return "", &model.ValidationError{Field: "Provider", Reason: "unknown provider; auth policy undefined"}
 	}
 }
+
+// AuthPolicy is the exact-identity successor to RequiredAuth. RequiredAuth is
+// retained as the source-compatible legacy bridge; new construction code should
+// use this policy so provider, transport, scheme, usage, issuer, and audience
+// are all bound together.
+func (p Provider) AuthPolicy(format model.APIFormat) (AuthPolicy, error) {
+	return authPolicyForProvider(p, format)
+}
