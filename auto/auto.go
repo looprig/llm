@@ -139,7 +139,7 @@ type options struct {
 	tlsRootCAs        *x509.CertPool
 }
 
-// WithRoundTripper supplies a verified caller-owned transport to supported
+// WithTLSRootCAs supplies a caller-owned verified certificate pool to supported
 // generic clients; nil is rejected immediately.
 func WithTLSRootCAs(roots *x509.CertPool) Option {
 	if roots == nil {

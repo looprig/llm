@@ -61,8 +61,8 @@ type config struct {
 // Option customizes an OpenRouter client at construction time.
 type Option func(*config)
 
-// WithRoundTripper installs a caller-owned verified transport for tests and
-// controlled clients; nil is rejected rather than silently using defaults.
+// WithTLSRootCAs installs a caller-owned verified certificate pool for tests
+// and controlled clients; nil is rejected rather than silently using defaults.
 func WithTLSRootCAs(roots *x509.CertPool) Option {
 	if roots == nil {
 		panic("openrouter: TLS roots must not be nil")
