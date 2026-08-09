@@ -1,5 +1,7 @@
 package openai
 
+import "net/http"
+
 // ReasoningOptions controls OpenAI reasoning. Effort is encoded as the
 // Responses reasoning object or Chat Completions reasoning_effort field,
 // depending on the selected model APIFormat. Summary applies to Responses.
@@ -23,10 +25,18 @@ type config struct {
 	serviceTier    ServiceTier
 	metadata       map[string]string
 	promptCacheKey string
+	roundTripper   http.RoundTripper
 }
 
 // Option customizes an OpenAI client at construction time.
 type Option func(*config)
+
+func WithRoundTripper(rt http.RoundTripper) Option {
+	if rt == nil {
+		panic("openai: round tripper must not be nil")
+	}
+	return func(c *config) { c.roundTripper = rt }
+}
 
 // WithReasoning sets the provider reasoning controls. It replaces any
 // reasoning controls inferred from model sampling so the caller has one

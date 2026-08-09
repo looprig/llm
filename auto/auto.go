@@ -14,6 +14,7 @@ package auto
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/looprig/credentials"
 	"github.com/looprig/credentials/httpauth"
@@ -135,6 +136,16 @@ type options struct {
 	openRouter        []openrouter.Option
 	constructorKey    auth.APIKey
 	constructorKeySet bool
+	roundTripper      http.RoundTripper
+}
+
+// WithRoundTripper supplies a verified caller-owned transport to supported
+// generic clients; nil is rejected immediately.
+func WithRoundTripper(rt http.RoundTripper) Option {
+	if rt == nil {
+		panic("auto: round tripper must not be nil")
+	}
+	return func(config *options) { config.roundTripper = rt }
 }
 
 // WithOpenRouterOptions applies OpenRouter-specific headers and request-body
@@ -338,15 +349,23 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options)
 		// OpenRouter is an OpenAI-compatible aggregation gateway behind a Bearer key. The
 		// fail-closed empty-key guard above (RequiredAuth → AuthAPIKey) already rejected a
 		// missing key, so key is present here; wrap it as Bearer auth.
-		if len(config.openRouter) > 0 {
-			return openrouter.New(selected, key, config.openRouter...)
+		if len(config.openRouter) > 0 || config.roundTripper != nil {
+			options := append([]openrouter.Option(nil), config.openRouter...)
+			if config.roundTripper != nil {
+				options = append(options, openrouter.WithRoundTripper(config.roundTripper))
+			}
+			return openrouter.New(selected, key, options...)
 		}
 		if key != auth.APIKey("credential-source") {
 			return genericHTTP(selected, auth.Key(key))
 		}
 		return genericHTTPWithAuth(selected)
 	case llm.ProviderOpenAI:
-		return openaiprovider.New(selected, key)
+		var options []openaiprovider.Option
+		if config.roundTripper != nil {
+			options = append(options, openaiprovider.WithRoundTripper(config.roundTripper))
+		}
+		return openaiprovider.New(selected, key, options...)
 	case llm.ProviderAzure:
 		return azureprovider.New(selected, key)
 	case llm.ProviderAnthropic:

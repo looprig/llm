@@ -55,6 +55,10 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	transportOptions := []transport.Option{}
+	if cfg.roundTripper != nil {
+		transportOptions = append(transportOptions, transport.WithRoundTripper(cfg.roundTripper))
+	}
 	return transport.New(
 		transport.Endpoint{
 			BaseURL:   baseURL,
@@ -63,7 +67,7 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		},
 		apiRouter{},
 		requestCodec{config: cfg, apiFormat: selected.APIFormat},
-		auth.Key(key),
+		auth.Key(key), transportOptions...,
 	), nil
 }
 

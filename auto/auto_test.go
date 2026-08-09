@@ -400,7 +400,7 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 	t.Parallel()
 
 	bodyCh := make(chan []byte, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		bodyCh <- body
 		w.Header().Set("Content-Type", "application/json")
@@ -409,7 +409,7 @@ func TestNewWithOpenRouterOptions(t *testing.T) {
 	defer srv.Close()
 
 	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
-	client, err := New(selected, "sk-or-test", WithOpenRouterOptions(openrouter.WithUsage(false)))
+	client, err := New(selected, "sk-or-test", WithRoundTripper(srv.Client().Transport), WithOpenRouterOptions(openrouter.WithUsage(false)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -436,7 +436,7 @@ func TestNewWithOpenRouterDelegatesStaticAPIKey(t *testing.T) {
 	t.Parallel()
 
 	requestHeaders := make(chan http.Header, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestHeaders <- r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"response-id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
@@ -444,7 +444,7 @@ func TestNewWithOpenRouterDelegatesStaticAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
-	client, err := New(selected, "sk-or-static")
+	client, err := New(selected, "sk-or-static", WithRoundTripper(srv.Client().Transport))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -460,7 +460,7 @@ func TestNewWithAuthUsesLeaseAuthorizer(t *testing.T) {
 	t.Parallel()
 
 	requestHeaders := make(chan http.Header, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestHeaders <- r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"response-id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
@@ -485,7 +485,7 @@ func TestNewWithAuthUsesLeaseAuthorizer(t *testing.T) {
 		generation: generation,
 		authorizer: auth.Key("lease-key"),
 	}}
-	client, err := NewWithAuth(selected, source)
+	client, err := NewWithAuth(selected, source, WithRoundTripper(srv.Client().Transport))
 	if err != nil {
 		t.Fatalf("NewWithAuth() error = %v", err)
 	}
