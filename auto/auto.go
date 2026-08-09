@@ -220,7 +220,8 @@ func New(selected model.Model, key auth.APIKey, opts ...Option) (inference.Clien
 	}
 	delegatedOpts := append([]Option(nil), opts...)
 	delegatedOpts = append(delegatedOpts, withConstructorKey(key))
-	return NewWithAuth(selected, source, delegatedOpts...)
+	config := collectOptions(delegatedOpts...)
+	return newWithAuth(selected, source, key, config, false)
 }
 
 // NewWithAuth is the canonical credential-backed construction path. It binds a
@@ -232,7 +233,7 @@ func NewWithAuth(selected model.Model, source credentials.Source, opts ...Option
 	if config.constructorKeySet {
 		constructorKey = config.constructorKey
 	}
-	return newWithAuth(selected, source, constructorKey, config)
+	return newWithAuth(selected, source, constructorKey, config, true)
 }
 
 func withConstructorKey(key auth.APIKey) Option {
@@ -242,7 +243,7 @@ func withConstructorKey(key auth.APIKey) Option {
 	}
 }
 
-func newWithAuth(selected model.Model, source credentials.Source, constructorKey auth.APIKey, config options) (inference.Client, error) {
+func newWithAuth(selected model.Model, source credentials.Source, constructorKey auth.APIKey, config options, dynamic bool) (inference.Client, error) {
 	if err := llm.ValidateModel(selected); err != nil {
 		return nil, err
 	}
@@ -256,7 +257,7 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	if err := credentialclient.ValidateSource(source, policy); err != nil {
 		return nil, err
 	}
-	if constructorKey == "credential-source" && !dynamicPolicySupported(selected) {
+	if dynamic && !dynamicPolicySupported(selected) {
 		return nil, &credentialclient.ConstructionError{Reason: "provider/API format does not support dynamic call-scoped credentials"}
 	}
 	// Existing provider constructors remain the compatibility construction seam.
@@ -264,15 +265,15 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	// explicit key through a private option so old concrete constructors retain
 	// their static behavior. Call-scoped transports are still supplied by the
 	// credentialclient adapter; no sentinel is ever sent.
-	inner, err := constructInnerConfig(selected, constructorKey, config)
+	inner, err := constructInnerConfig(selected, constructorKey, config, dynamic)
 	if err != nil {
 		return nil, err
 	}
-	if constructorKey != "credential-source" && !dynamicPolicySupported(selected) {
+	if !dynamic && !dynamicPolicySupported(selected) {
 		return inner, nil
 	}
 	if !credentialclient.SupportsCallScoped(inner) {
-		if constructorKey != "credential-source" {
+		if !dynamic {
 			// Preserve the legacy static New surface for bespoke clients that have
 			// not yet adopted call-scoped authorization. NewWithAuth remains
 			// fail-closed for dynamic sources.
@@ -308,7 +309,7 @@ func dynamicPolicySupported(selected model.Model) bool {
 // signatures. It is intentionally private: callers must go through New or
 // NewWithAuth so exact source policy checks cannot be bypassed.
 func constructInner(selected model.Model, key auth.APIKey, opts ...Option) (inference.Client, error) {
-	return constructInnerConfig(selected, key, collectOptions(opts...))
+	return constructInnerConfig(selected, key, collectOptions(opts...), false)
 }
 
 func collectOptions(opts ...Option) options {
@@ -321,7 +322,7 @@ func collectOptions(opts ...Option) options {
 	return config
 }
 
-func constructInnerConfig(selected model.Model, key auth.APIKey, config options) (inference.Client, error) {
+func constructInnerConfig(selected model.Model, key auth.APIKey, config options, dynamic bool) (inference.Client, error) {
 	if err := llm.ValidateModel(selected); err != nil {
 		return nil, err
 	}
@@ -363,7 +364,7 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options)
 		// selects the codec by the model's declared APIFormat and fails closed on any
 		// format with no codec, rather than silently mis-encoding. A local endpoint needs
 		// no credentials.
-		if key != auth.APIKey("credential-source") {
+		if !dynamic {
 			return genericHTTP(selected, auth.None())
 		}
 		return genericHTTPWithAuth(selected)
@@ -378,7 +379,7 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options)
 			}
 			return openrouter.New(selected, key, options...)
 		}
-		if key != auth.APIKey("credential-source") {
+		if !dynamic {
 			return genericHTTP(selected, auth.Key(key))
 		}
 		return genericHTTPWithAuth(selected)
