@@ -268,6 +268,9 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 	if err != nil {
 		return nil, err
 	}
+	if constructorKey != "credential-source" && !dynamicPolicySupported(selected) {
+		return inner, nil
+	}
 	if !credentialclient.SupportsCallScoped(inner) {
 		if constructorKey != "credential-source" {
 			// Preserve the legacy static New surface for bespoke clients that have

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"testing"
 	"time"
 
@@ -38,6 +39,21 @@ func testTLSRoots(srv *httptest.Server) *x509.CertPool {
 	roots := x509.NewCertPool()
 	roots.AddCert(srv.Certificate())
 	return roots
+}
+
+func TestDynamicSupportMatrixIsExplicit(t *testing.T) {
+	want := map[llm.Provider]map[model.APIFormat]struct{}{
+		llm.ProviderOpenAI:     {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
+		llm.ProviderOpenRouter: {model.APIFormatOpenAI: {}},
+		llm.ProviderAnthropic:  {model.APIFormatAnthropic: {}},
+		llm.ProviderLMStudio:   {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
+	}
+	if !reflect.DeepEqual(dynamicSupport, want) {
+		t.Fatalf("dynamic support matrix = %#v, want %#v", dynamicSupport, want)
+	}
+	if dynamicPolicySupported(model.Model{Provider: "future", APIFormat: model.APIFormatOpenAI}) {
+		t.Fatal("unknown provider dynamically supported")
+	}
 }
 func chutesKimiK2Model() model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderChutes), model.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", model.WithContextLimits(model.ContextLimits{WindowTokens: 128_000}), model.WithTools(), model.WithThinking())
