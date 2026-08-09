@@ -55,6 +55,19 @@ func TestDynamicSupportMatrixIsExplicit(t *testing.T) {
 		t.Fatal("unknown provider dynamically supported")
 	}
 }
+
+func TestLegacyLiteralCredentialSourceKeyIsNotConstructionSentinel(t *testing.T) {
+	client, err := New(chutesKimiK2Model(), auth.APIKey("credential-source"))
+	if err != nil {
+		t.Fatalf("New() with literal key returned error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("New() with literal key returned nil client")
+	}
+	if _, ok := client.(*credentialclient.Client); ok {
+		t.Fatal("unsupported legacy provider was incorrectly wrapped as dynamic credential client")
+	}
+}
 func chutesKimiK2Model() model.Model {
 	return model.CustomModel(model.ProviderName(llm.ProviderChutes), model.APIFormatOpenAI, "https://api.chutes.ai", "moonshotai/Kimi-K2.6-TEE", model.WithContextLimits(model.ContextLimits{WindowTokens: 128_000}), model.WithTools(), model.WithThinking())
 }
