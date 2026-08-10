@@ -74,6 +74,32 @@ func TestContractMatrixInvokesEveryIngressCodec(t *testing.T) {
 	}
 }
 
+func TestValidateWireRequestUsesLowercaseErrorPrefixes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		format model.APIFormat
+		want   string
+	}{
+		{name: "anthropic", format: model.APIFormatAnthropic, want: `anthropic request missing "tools"`},
+		{name: "openai chat", format: model.APIFormatOpenAI, want: `openai chat request missing "tools"`},
+		{name: "openai responses", format: model.APIFormatOpenAIResponses, want: `openai responses request missing "tools"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateWireRequest(test.format, []byte(`{"lookup":"call_1"}`), false)
+			if err == nil {
+				t.Fatal("validateWireRequest() error = nil, want missing-marker error")
+			}
+			if got := err.Error(); got != test.want {
+				t.Fatalf("validateWireRequest() error = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func fixtureContract() Contract {
 	return Contract{
 		Provider: "fixture-provider",

@@ -1022,19 +1022,19 @@ func validateWireRequest(format model.APIFormat, body []byte, streaming bool) er
 	case model.APIFormatAnthropic:
 		for _, marker := range []string{"\"tools\"", "\"thinking\"", "\"output_config\"", "\"cache_control\"", "\"type\":\"image\""} {
 			if !strings.Contains(raw, marker) {
-				return fmt.Errorf("Anthropic request missing %s", marker)
+				return fmt.Errorf("anthropic request missing %s", marker)
 			}
 		}
 	case model.APIFormatOpenAI:
 		for _, marker := range []string{"\"tools\"", "\"response_format\"", "\"reasoning_effort\"", "\"image_url\""} {
 			if !strings.Contains(raw, marker) {
-				return fmt.Errorf("OpenAI Chat request missing %s", marker)
+				return fmt.Errorf("openai chat request missing %s", marker)
 			}
 		}
 	case model.APIFormatOpenAIResponses:
 		for _, marker := range []string{"\"tools\"", "\"text\"", "\"reasoning\"", "\"input_image\"", "\"store\":false"} {
 			if !strings.Contains(raw, marker) {
-				return fmt.Errorf("OpenAI Responses request missing %s", marker)
+				return fmt.Errorf("openai responses request missing %s", marker)
 			}
 		}
 	}

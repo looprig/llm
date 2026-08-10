@@ -61,18 +61,18 @@ fmt-check:
 
 lint: fmt-check vendor-check
 	go vet ./...
-	go tool staticcheck ./...
+	go run -mod=mod honnef.co/go/tools/cmd/staticcheck ./...
 	# gosec is NOT module-aware: its ./... is a filesystem walk that descends into
 	# the nested .worktrees/ checkouts (separate modules) and, under -mod=vendor,
 	# reports modules.txt desyncs for those foreign trees. Scope it to THIS module's
 	# package dirs via GO_DIRS (the same go-list idiom fmt/fmt-check use). go vet and
 	# staticcheck are module-aware (go list stops at module boundaries), so they need
 	# no scoping.
-	go tool gosec $(GO_DIRS)
+	go run -mod=mod github.com/securego/gosec/v2/cmd/gosec -confidence medium $(GO_DIRS)
 
 vuln:
 	go mod verify
-	go tool govulncheck ./...
+	go run -mod=mod golang.org/x/vuln/cmd/govulncheck ./...
 
 secure: lint vuln
 
