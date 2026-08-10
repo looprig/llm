@@ -41,7 +41,7 @@ const ReviewedAtDate = "2026-08-09"
 const (
 	EvidenceAuthURL                   = "https://learn.chatgpt.com/docs/auth"
 	EvidenceCodexPlanURL              = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan"
-	EvidenceEnterpriseAccessTokensURL = "https://learn.chatgpt.com/docs/enterprise/access-tokens"
+	EvidenceEnterpriseAccessTokensURL = "https://learn.chatgpt.com/docs/enterprise/access-tokens" // #nosec G101 -- "access-tokens" is a documentation URL phrase, not a credential.
 	EvidenceSignInWithChatGPTURL      = "https://help.openai.com/en/articles/20001410-sign-in-with-chatgpt"
 	EvidenceAPIQuickstartURL          = "https://platform.openai.com/docs/quickstart/make-your-first-api-request"
 )

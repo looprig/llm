@@ -68,7 +68,7 @@ lint: fmt-check vendor-check
 	# package dirs via GO_DIRS (the same go-list idiom fmt/fmt-check use). go vet and
 	# staticcheck are module-aware (go list stops at module boundaries), so they need
 	# no scoping.
-	go run -mod=mod github.com/securego/gosec/v2/cmd/gosec -confidence medium $(GO_DIRS)
+	go run -mod=mod github.com/securego/gosec/v2/cmd/gosec $(GO_DIRS)
 
 vuln:
 	go mod verify
