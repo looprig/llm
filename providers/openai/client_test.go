@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/looprig/core/content"
@@ -309,6 +310,53 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
+func TestWithRoundTripperRejectsNil(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("WithRoundTripper(nil) did not panic")
+		}
+	}()
+	openai.WithRoundTripper(nil)
+}
+
+func TestWithRoundTripperRoutesInvokeThroughCallerTransport(t *testing.T) {
+	t.Parallel()
+
+	selected := model.CustomModel(
+		model.ProviderName(llm.ProviderOpenAI),
+		model.APIFormatOpenAI,
+		"https://caller-owned.invalid/v1",
+		"gpt-4.1",
+	)
+	var calls int
+	rt := openAIRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"chat","model":"gpt-4.1","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)),
+			Request:    req,
+		}, nil
+	})
+
+	client, err := openai.New(selected, "sk-test", openai.WithRoundTripper(rt))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	resp, err := client.Invoke(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if resp == nil || resp.Message == nil {
+		t.Fatalf("Invoke() response = %+v, want decoded response", resp)
+	}
+	if calls != 1 {
+		t.Fatalf("caller-owned RoundTripper calls = %d, want 1", calls)
+	}
+}
+
 func TestMalformedAndHTTPErrorResponses(t *testing.T) {
 	t.Parallel()
 
@@ -362,3 +410,9 @@ func decodeField(t *testing.T, body map[string]json.RawMessage, key string, out 
 }
 
 func intPtr(value int) *int { return &value }
+
+type openAIRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f openAIRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}

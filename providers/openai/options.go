@@ -1,6 +1,9 @@
 package openai
 
-import "crypto/x509"
+import (
+	"crypto/x509"
+	"net/http"
+)
 
 // ReasoningOptions controls OpenAI reasoning. Effort is encoded as the
 // Responses reasoning object or Chat Completions reasoning_effort field,
@@ -26,6 +29,15 @@ type config struct {
 	metadata       map[string]string
 	promptCacheKey string
 	tlsRootCAs     *x509.CertPool
+	roundTripper   http.RoundTripper
+}
+
+// WithRoundTripper installs a caller-owned verified transport.
+func WithRoundTripper(rt http.RoundTripper) Option {
+	if rt == nil {
+		panic("openai: round tripper must not be nil")
+	}
+	return func(c *config) { c.roundTripper = rt }
 }
 
 // Option customizes an OpenAI client at construction time.
