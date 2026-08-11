@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "repository": "llm",
+  "proofSources": [
+    {
+      "id": "example-llm-auto-source",
+      "type": "source",
+      "path": "examples/auto/main.go",
+      "symbol": "main"
+    },
+    {
+      "id": "example-llm-credentials-source",
+      "type": "source",
+      "path": "examples/credentials/main.go",
+      "symbol": "main"
+    },
+    {
+      "id": "example-llm-runnable-test",
+      "type": "test",
+      "path": "examples/examples_test.go",
+      "symbol": "TestRunnableDocumentationExamples"
+    },
+    {
+      "id": "example-llm-manifest-test",
+      "type": "test",
+      "path": "examples/examples_test.go",
+      "symbol": "TestDocumentationManifestAndWorkflow"
+    }
+  ],
+  "examples": [
+    {
+      "id": "example-llm-auto-provider-counter",
+      "ecosystem": "go",
+      "owner": "llm",
+      "sourcePath": "examples/auto/main.go",
+      "availability": "source-workspace",
+      "versions": {
+        "github.com/looprig/llm": "source-workspace"
+      },
+      "offlineCommand": "GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/auto",
+      "assertion": "Program output proves automatic OpenAI client selection, exact counter metadata, and fail-closed reporting when a provider has no exact counter.",
+      "workflowPath": ".github/workflows/docs-examples.yml",
+      "jobId": "docs-examples",
+      "cleanup": "No cleanup required; construction and capability inspection perform no network calls.",
+      "liveGate": null,
+      "proofIds": [
+        "example-llm-auto-source",
+        "example-llm-runnable-test",
+        "example-llm-manifest-test"
+      ]
+    },
+    {
+      "id": "example-llm-credential-source-lease",
+      "ecosystem": "go",
+      "owner": "llm",
+      "sourcePath": "examples/credentials/main.go",
+      "availability": "source-workspace",
+      "versions": {
+        "github.com/looprig/llm": "source-workspace"
+      },
+      "offlineCommand": "GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/credentials",
+      "assertion": "Program output proves NewWithAuth acquires a fresh call-scoped lease for each request and applies both rotating authorizers to a deterministic local TLS provider without printing either credential.",
+      "workflowPath": ".github/workflows/docs-examples.yml",
+      "jobId": "docs-examples",
+      "cleanup": "The in-process TLS fixture is closed with defer; no files or remote resources are created.",
+      "liveGate": null,
+      "proofIds": [
+        "example-llm-credentials-source",
+        "example-llm-runnable-test",
+        "example-llm-manifest-test"
+      ]
+    }
+  ]
+}

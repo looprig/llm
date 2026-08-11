@@ -1,0 +1,28 @@
+name: Docs examples
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  docs-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run automatic provider and counter example
+        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/auto
+      - name: Run credential source and lease example
+        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/credentials
+      - name: Run native repository tests
+        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make test
+      - name: Run race-enabled standalone tests
+        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go test -race ./...
