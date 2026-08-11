@@ -13,7 +13,7 @@ require (
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/looprig/core v0.5.1
 	github.com/looprig/credentials v0.1.0
-	github.com/looprig/inference v0.9.1
+	github.com/looprig/inference v0.9.2
 	github.com/looprig/secrets v0.1.0
 	golang.org/x/crypto v0.54.0
 )
