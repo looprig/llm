@@ -24,5 +24,3 @@ jobs:
         run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/credentials
       - name: Run native repository tests
         run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make test
-      - name: Run race-enabled standalone tests
-        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go test -race ./...

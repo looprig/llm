@@ -50,7 +50,12 @@ func TestDocumentationManifestAndWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
 	workflowText := string(workflow)
+	makefileText := string(makefile)
 	for _, example := range manifest.Examples {
 		if example.Availability != "source-workspace" || example.WorkflowPath != ".github/workflows/docs-examples.yml" || example.JobID != "docs-examples" {
 			t.Fatalf("example %q has invalid source/workflow metadata", example.ID)
@@ -62,8 +67,14 @@ func TestDocumentationManifestAndWorkflow(t *testing.T) {
 			t.Fatalf("workflow does not literally run %q", example.OfflineCommand)
 		}
 	}
-	if !strings.Contains(workflowText, "GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go test -race ./...") {
-		t.Fatal("workflow does not run the full standalone race suite")
+	if !strings.Contains(workflowText, "run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make test") {
+		t.Fatal("workflow does not run the native test target")
+	}
+	if !strings.Contains(makefileText, "test:\n\tgo test -race ./...") {
+		t.Fatal("Makefile test target does not run the full race suite")
+	}
+	if strings.Contains(workflowText, "go test -race ./...") {
+		t.Fatal("workflow duplicates the race suite outside the native test target")
 	}
 }
 
