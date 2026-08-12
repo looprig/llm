@@ -157,7 +157,7 @@ github.com/looprig/core/content
 ## explicit; go 1.26.4
 github.com/looprig/credentials
 github.com/looprig/credentials/httpauth
-# github.com/looprig/inference v0.9.2
+# github.com/looprig/inference v0.10.0
 ## explicit; go 1.26.4
 github.com/looprig/inference
 github.com/looprig/inference/auth
