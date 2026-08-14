@@ -11,12 +11,10 @@ tool (
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/google/go-tdx-guest v0.3.1
-	github.com/looprig/core v0.5.1
-	github.com/looprig/credentials v0.1.0
-	github.com/looprig/inference v0.10.0
-	github.com/looprig/secrets v0.1.0
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	go.yaml.in/yaml/v3 v3.0.5
+	github.com/looprig/core v0.6.0
+	github.com/looprig/credentials v0.2.0
+	github.com/looprig/inference v0.11.0
+	github.com/looprig/secrets v0.2.0
 	golang.org/x/crypto v0.54.0
 )
 
@@ -44,6 +42,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/openai/openai-go/v3 v3.50.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/securego/gosec/v2 v2.28.0 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
@@ -57,6 +56,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260810151157-a8b543ca52da // indirect
 	golang.org/x/mod v0.39.0 // indirect
