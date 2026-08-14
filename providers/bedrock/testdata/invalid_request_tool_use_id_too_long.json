@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+            "name": "search",
+            "input": {}
+          }
+        }
+      ]
+    }
+  ]
+}

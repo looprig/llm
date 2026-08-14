@@ -1,0 +1,29 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Oslo",
+                "unit": "celsius"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 41,
+    "candidatesTokenCount": 8,
+    "totalTokenCount": 49,
+    "toolUsePromptTokenCount": 0
+  },
+  "modelVersion": "gemini-2.5-pro"
+}

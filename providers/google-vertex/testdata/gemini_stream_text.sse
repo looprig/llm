@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Oslo is "}]},"index":0}],"modelVersion":"gemini-2.5-flash"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"4 degrees celsius."}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":8,"totalTokenCount":20},"modelVersion":"gemini-2.5-flash"}
+

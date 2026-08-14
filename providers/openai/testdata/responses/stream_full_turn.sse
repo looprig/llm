@@ -1,0 +1,42 @@
+event: response.created
+data: {"type":"response.created","sequence_number":1,"response":{"id":"resp_s15","object":"response","created_at":1770000000,"status":"in_progress","error":null,"incomplete_details":null,"instructions":null,"model":"gpt-5","output":[],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"reasoning","id":"rs_s15","summary":[],"status":"in_progress"}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","sequence_number":3,"item_id":"rs_s15","output_index":0,"summary_index":0,"delta":"Plan the call."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"type":"reasoning","id":"rs_s15","summary":[{"type":"summary_text","text":"Plan the call."}],"encrypted_content":"gAAAAABn-full-turn","status":"completed"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":5,"output_index":1,"item":{"id":"msg_s15","type":"message","role":"assistant","content":[],"status":"in_progress"}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","sequence_number":6,"item_id":"msg_s15","output_index":1,"content_index":0,"part":{"type":"output_text","text":"","annotations":[],"logprobs":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":7,"item_id":"msg_s15","output_index":1,"content_index":0,"delta":"Checking the weather.","logprobs":[]}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","sequence_number":8,"item_id":"msg_s15","output_index":1,"content_index":0,"part":{"type":"output_text","text":"Checking the weather.","annotations":[],"logprobs":[]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":9,"output_index":1,"item":{"id":"msg_s15","type":"message","role":"assistant","content":[{"type":"output_text","text":"Checking the weather.","annotations":[],"logprobs":[]}],"status":"completed"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":10,"output_index":2,"item":{"type":"function_call","call_id":"call_s15","name":"get_weather","arguments":"","id":"fc_s15","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":11,"item_id":"fc_s15","output_index":2,"delta":"{\"city\":\"Rome\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":12,"item_id":"fc_s15","output_index":2,"name":"get_weather","arguments":"{\"city\":\"Rome\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":13,"output_index":2,"item":{"type":"function_call","call_id":"call_s15","name":"get_weather","arguments":"{\"city\":\"Rome\"}","id":"fc_s15","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":14,"response":{"id":"resp_s15","object":"response","created_at":1770000000,"status":"completed","error":null,"incomplete_details":null,"instructions":null,"model":"gpt-5","output":[{"type":"reasoning","id":"rs_s15","summary":[{"type":"summary_text","text":"Plan the call."}],"encrypted_content":"gAAAAABn-full-turn","status":"completed"},{"id":"msg_s15","type":"message","role":"assistant","content":[{"type":"output_text","text":"Checking the weather.","annotations":[],"logprobs":[]}],"status":"completed"},{"type":"function_call","call_id":"call_s15","name":"get_weather","arguments":"{\"city\":\"Rome\"}","id":"fc_s15","status":"completed"}],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1,"usage":{"input_tokens":88,"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":0},"output_tokens":30,"output_tokens_details":{"reasoning_tokens":12},"total_tokens":118}}}
+

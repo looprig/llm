@@ -1,0 +1,61 @@
+{
+  "id": "chatcmpl-logprobs",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Paris",
+        "refusal": null
+      },
+      "logprobs": {
+        "content": [
+          {
+            "token": "Paris",
+            "logprob": -0.0002,
+            "bytes": [
+              80,
+              97,
+              114,
+              105,
+              115
+            ],
+            "top_logprobs": [
+              {
+                "token": "Paris",
+                "logprob": -0.0002,
+                "bytes": [
+                  80,
+                  97,
+                  114,
+                  105,
+                  115
+                ]
+              },
+              {
+                "token": "Lyon",
+                "logprob": -9.1,
+                "bytes": [
+                  76,
+                  121,
+                  111,
+                  110
+                ]
+              }
+            ]
+          }
+        ],
+        "refusal": null
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 19,
+    "completion_tokens": 1,
+    "total_tokens": 20
+  }
+}

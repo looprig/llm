@@ -1,0 +1,50 @@
+{
+  "id": "resp_message_status",
+  "object": "response",
+  "created_at": 1770000000,
+  "status": "completed",
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "model": "gpt-5",
+  "output": [
+    {
+      "id": "msg_11",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Part one. ",
+          "annotations": [],
+          "logprobs": []
+        },
+        {
+          "type": "output_text",
+          "text": "Part two.",
+          "annotations": [],
+          "logprobs": []
+        }
+      ],
+      "status": "completed"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "metadata": {},
+  "tool_choice": "auto",
+  "tools": [],
+  "temperature": 1,
+  "top_p": 1,
+  "usage": {
+    "input_tokens": 15,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "output_tokens": 9,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 24
+  }
+}

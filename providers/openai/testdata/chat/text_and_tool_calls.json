@@ -1,0 +1,33 @@
+{
+  "id": "chatcmpl-text-and-tool",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "Let me look that up.",
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_lookup",
+            "type": "function",
+            "function": {
+              "name": "search",
+              "arguments": "{\"q\":\"weather\"}"
+            }
+          }
+        ]
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 33,
+    "completion_tokens": 21,
+    "total_tokens": 54
+  }
+}

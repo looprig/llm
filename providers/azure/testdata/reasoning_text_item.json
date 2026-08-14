@@ -1,0 +1,55 @@
+{
+  "id": "resp_az_3",
+  "object": "response",
+  "created_at": 1735689600,
+  "status": "completed",
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "model": "gpt-4.1",
+  "output": [
+    {
+      "id": "rs_az_1",
+      "type": "reasoning",
+      "summary": [],
+      "content": [
+        {
+          "type": "reasoning_text",
+          "text": "direct thought"
+        }
+      ]
+    },
+    {
+      "id": "msg_az_3",
+      "type": "message",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "the answer",
+          "annotations": [],
+          "logprobs": []
+        }
+      ]
+    }
+  ],
+  "parallel_tool_calls": true,
+  "metadata": {},
+  "tool_choice": "auto",
+  "tools": [],
+  "temperature": 1,
+  "top_p": 1,
+  "usage": {
+    "input_tokens": 12,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "output_tokens": 6,
+    "output_tokens_details": {
+      "reasoning_tokens": 3
+    },
+    "total_tokens": 18
+  }
+}

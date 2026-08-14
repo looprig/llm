@@ -478,7 +478,12 @@ func openStreamDeltas(wireBytes []byte, clientPriv *secp256k1.PrivateKey, model,
 	var chunks []content.Chunk
 	for {
 		frame, err := reader.Next()
-		if err == io.EOF {
+		// errors.Is, never ==: a framer that wraps its EOF (or is layered behind
+		// one that does) would otherwise fall through to the failure branch and
+		// report a cleanly finished stream as an SSE read failure, discarding every
+		// chunk already decoded from it. The fail-closed rule above is about chunks
+		// that were never verified; end of stream is not that.
+		if errors.Is(err, io.EOF) {
 			return chunks, nil
 		}
 		if err != nil {
@@ -579,6 +584,10 @@ func openStreamEvent(payload []byte, clientPriv *secp256k1.PrivateKey, model, no
 			return nil, attestErr(reasonE2EEFailed, err)
 		}
 		if s, ok := stringField(delta, respFieldReasoningContent); ok {
+			// Index stays zero for the same reason as the shared Chat codec:
+			// reasoning_content is one delta stream per choice with no
+			// per-block index on the wire, so every fragment belongs to a
+			// single reasoning block.
 			out = append(out, &content.ThinkingChunk{Thinking: s})
 		}
 	}

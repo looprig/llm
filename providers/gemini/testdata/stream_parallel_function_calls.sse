@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"city":"Oslo"}}},{"functionCall":{"name":"get_weather","args":{"city":"Bergen"}}}]},"index":0}],"modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":55,"candidatesTokenCount":18,"totalTokenCount":73},"modelVersion":"gemini-2.5-pro"}
+

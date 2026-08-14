@@ -1,0 +1,9 @@
+event: response.created
+data: {"type":"response.created","sequence_number":1,"response":{"id":"resp_s9","object":"response","created_at":1770000000,"status":"in_progress","error":null,"incomplete_details":null,"instructions":null,"model":"gpt-5","output":[],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_s9","output_index":0,"content_index":0,"delta":"partial","logprobs":[]}
+
+event: response.failed
+data: {"type":"response.failed","sequence_number":3,"response":{"id":"resp_s9","object":"response","created_at":1770000000,"status":"failed","error":{"code":"server_error","message":"The model failed mid-stream."},"incomplete_details":null,"instructions":null,"model":"gpt-5","output":[],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1}}
+

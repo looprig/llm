@@ -1,0 +1,13 @@
+{
+  "id": "chatcmpl-acs-6",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "gpt-4o-2024-11-20",
+  "prompt_filter_results": [
+    {
+      "prompt_index": 0,
+      "content_filter_results": {"jailbreak": {"filtered": true, "detected": true}}
+    }
+  ],
+  "choices": []
+}

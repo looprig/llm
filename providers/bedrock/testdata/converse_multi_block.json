@@ -1,0 +1,30 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "Checking now."
+        },
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_weather_1",
+            "name": "get_weather",
+            "input": {
+              "city": "Paris"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "stopReason": "tool_use",
+  "usage": {
+    "inputTokens": 44,
+    "outputTokens": 31,
+    "totalTokens": 75
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

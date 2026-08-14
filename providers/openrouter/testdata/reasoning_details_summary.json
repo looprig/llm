@@ -1,0 +1,26 @@
+{
+  "id": "or-2",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Paris.",
+        "refusal": null,
+        "reasoning_details": [
+          {
+            "type": "reasoning.summary",
+            "summary": "Recalled the capital directly.",
+            "format": "openai-responses-v1",
+            "index": 0
+          }
+        ]
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ]
+}

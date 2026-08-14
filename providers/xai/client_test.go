@@ -96,7 +96,7 @@ func TestNewInvokeUsesResponsesAndXAIOptions(t *testing.T) {
 			Name:   "lookup",
 			Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
 		}},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 		Output: &inference.OutputSchema{
 			Name:   "answer",
 			Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),

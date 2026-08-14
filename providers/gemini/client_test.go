@@ -145,6 +145,7 @@ func TestGeminiInvoke(t *testing.T) {
 	if !strings.Contains(string(got.body), `"contents"`) {
 		t.Errorf("body = %s, want a JSON body containing \"contents\"", got.body)
 	}
+	gateRequest(t, got.body)
 }
 
 // TestGeminiInvokePreservesStructuredOutputWithTools captures the bespoke
@@ -172,13 +173,16 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"},"details":{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}},"required":["answer","details"],"additionalProperties":false}`),
 		Strict: true,
 	}
-	wantProjectedSchema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"},"details":{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}},"required":["answer","details"]}`)
+	// Both schemas carry additionalProperties, which Gemini's Schema dialect
+	// cannot spell, so both must reach the wire verbatim through the untyped
+	// JSON-Schema fields rather than being projected lossily.
+	wantOutputSchema := append(json.RawMessage(nil), req.Output.Schema...)
 	wantToolSchema := json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`)
 	req.Tools = []inference.Tool{{
 		Name:   "lookup",
 		Schema: wantToolSchema,
 	}}
-	req.ToolChoice = inference.ToolChoiceRequired
+	req.ToolChoice = inference.ToolRequired()
 
 	c := gemini.NewWithEndpoint(testKey, srv.URL)
 	resp, err := c.Invoke(context.Background(), req)
@@ -196,8 +200,9 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 		} `json:"generationConfig"`
 		Tools []struct {
 			FunctionDeclarations []struct {
-				Name       string          `json:"name"`
-				Parameters json.RawMessage `json:"parameters"`
+				Name                 string          `json:"name"`
+				Parameters           json.RawMessage `json:"parameters"`
+				ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema"`
 			} `json:"functionDeclarations"`
 		} `json:"tools"`
 		ToolConfig struct {
@@ -206,17 +211,23 @@ func TestGeminiInvokePreservesStructuredOutputWithTools(t *testing.T) {
 			} `json:"functionCallingConfig"`
 		} `json:"toolConfig"`
 	}
-	if err := json.Unmarshal(<-bodyCh, &wire); err != nil {
+	body := <-bodyCh
+	gateRequest(t, body)
+	if err := json.Unmarshal(body, &wire); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 	if wire.GenerationConfig.ResponseMIMEType != "application/json" {
 		t.Errorf("generationConfig = %+v, want JSON MIME type and schema", wire.GenerationConfig)
 	}
-	assertJSONSemanticallyEqual(t, wire.GenerationConfig.ResponseJSONSchema, wantProjectedSchema)
+	assertJSONSemanticallyEqual(t, wire.GenerationConfig.ResponseJSONSchema, wantOutputSchema)
 	if len(wire.Tools) != 1 || len(wire.Tools[0].FunctionDeclarations) != 1 || wire.Tools[0].FunctionDeclarations[0].Name != "lookup" {
 		t.Errorf("tools = %+v, want one lookup declaration", wire.Tools)
 	} else {
-		assertJSONSemanticallyEqual(t, wire.Tools[0].FunctionDeclarations[0].Parameters, wantToolSchema)
+		declaration := wire.Tools[0].FunctionDeclarations[0]
+		if len(declaration.Parameters) != 0 {
+			t.Errorf("parameters = %s, want the schema in parametersJsonSchema instead", declaration.Parameters)
+		}
+		assertJSONSemanticallyEqual(t, declaration.ParametersJSONSchema, wantToolSchema)
 	}
 	if wire.ToolConfig.FunctionCallingConfig.Mode != "ANY" {
 		t.Errorf("toolConfig mode = %q, want ANY", wire.ToolConfig.FunctionCallingConfig.Mode)
@@ -288,6 +299,9 @@ func TestGeminiInvokeErrors(t *testing.T) {
 					conn.Close()
 					return
 				}
+				// An error-path test still encodes a real request; hold it to
+				// the schema so a failure mapping cannot mask a bad body.
+				gateSentRequest(t, r)
 				w.WriteHeader(tt.serverStatus)
 				fmt.Fprint(w, tt.serverBody)
 			}))
@@ -343,7 +357,8 @@ func TestGeminiAPIErrorBodyBound(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gateSentRequest(t, r)
 				w.WriteHeader(http.StatusBadGateway)
 				_, _ = io.WriteString(w, providerBody)
 			}))
@@ -384,6 +399,11 @@ func TestGeminiStream(t *testing.T) {
 		// Two partial GenerateContentResponse events, SSE-framed.
 		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n")
 		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\", world\"}]}}]}\n\n")
+		// Terminal frame. Gemini documents an empty finishReason as "the model
+		// has not stopped generating tokens", so a stream without one is a
+		// truncation and the decoder now rejects it rather than reporting a
+		// clean result.
+		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"STOP\"}]}\n\n")
 	}))
 	defer srv.Close()
 
@@ -430,6 +450,9 @@ func TestGeminiStream(t *testing.T) {
 	if got.accept != "text/event-stream" {
 		t.Errorf("Accept = %q, want text/event-stream", got.accept)
 	}
+	// The streaming body is byte-for-byte the non-streaming one (Gemini selects
+	// the endpoint, not a body flag), so it is held to the same schema.
+	gateRequest(t, got.body)
 }
 
 // TestGeminiStreamErrorStatus locks the streaming non-2xx path: a non-2xx status is
@@ -438,6 +461,7 @@ func TestGeminiStreamErrorStatus(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gateSentRequest(t, r)
 		w.WriteHeader(http.StatusTooManyRequests)
 		fmt.Fprint(w, `{"error":{"message":"rate limited"}}`)
 	}))

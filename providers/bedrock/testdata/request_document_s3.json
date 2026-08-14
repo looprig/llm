@@ -1,0 +1,23 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "document": {
+            "format": "pdf",
+            "name": "q3 report",
+            "source": {
+              "s3Location": {
+                "uri": "s3://example-bucket/q3.pdf"
+              }
+            }
+          }
+        },
+        {
+          "text": "Summarise this PDF."
+        }
+      ]
+    }
+  ]
+}

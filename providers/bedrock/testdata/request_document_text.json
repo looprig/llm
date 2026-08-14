@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "document": {
+            "format": "txt",
+            "name": "notes",
+            "source": {
+              "text": "line one\nline two\n"
+            }
+          }
+        },
+        {
+          "text": "Summarise this note."
+        }
+      ]
+    }
+  ]
+}

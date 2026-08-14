@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionResponse": {
+              "name": "render_chart",
+              "response": {
+                "status": "ok"
+              },
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-flash"
+}

@@ -1,0 +1,27 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "thought": true,
+            "thoughtSignature": "CpMBAVSoXO9zaWduYXR1cmUtb25seQ=="
+          },
+          {
+            "text": "42"
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 8,
+    "candidatesTokenCount": 2,
+    "thoughtsTokenCount": 30,
+    "totalTokenCount": 40
+  },
+  "modelVersion": "gemini-2.5-pro"
+}

@@ -1,0 +1,27 @@
+{
+  "id": "or-1",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Paris.",
+        "refusal": null,
+        "reasoning": "Let me recall European capitals.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Let me recall European capitals.",
+            "format": "anthropic-claude-v1",
+            "index": 0
+          }
+        ]
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ]
+}

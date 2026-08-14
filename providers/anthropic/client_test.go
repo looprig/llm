@@ -68,7 +68,7 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 		srv.URL+"/v1/",
 		"claude-sonnet-4",
 		model.WithTools(),
-		model.WithThinking(),
+		model.WithThinkingDialect(model.ThinkingDialectAdaptive),
 		model.WithStructuredOutputWithTools(),
 		model.WithSampling(model.Sampling{Effort: model.EffortHigh, MaxTokens: intPtr(256)}),
 	)
@@ -92,6 +92,12 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 				Role:   content.RoleUser,
 				Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
 			}},
+			&content.AIMessage{Message: content.Message{
+				Role: content.RoleAssistant,
+				Blocks: []content.Block{&content.ToolUseBlock{
+					ID: "tool_previous", Name: "lookup", Input: json.RawMessage(`{"city":"NYC"}`),
+				}},
+			}},
 			&content.ToolResultMessage{
 				Message:   content.Message{Role: content.RoleTool, Blocks: []content.Block{&content.TextBlock{Text: "result"}}},
 				ToolUseID: "tool_previous",
@@ -103,7 +109,7 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 			Description: "Look up a city",
 			Schema:      json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"additionalProperties":false}`),
 		}},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 		Output: &inference.OutputSchema{
 			Name:   "answer",
 			Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
@@ -132,10 +138,22 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 		t.Errorf("usage = %+v, want input=12/cache_read=2/cache_creation=1/output=9", resp.Usage)
 	}
 
+	raw := <-bodyCh
+	// The gate runs before every structural assertion below: the bytes that
+	// reached the server must be a legal CreateMessageParams, or nothing the
+	// assertions prove about them matters.
+	gateRequest(t, raw)
+
 	var body map[string]json.RawMessage
-	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("request body JSON error = %v", err)
 	}
+	// This request sets no TransientMessages, so NOTHING in it is transient and
+	// every message — including the live user turn — is "committed". A
+	// breakpoint on the last message would move with every turn: a cache WRITE
+	// every turn and never a read, strictly worse than not enabling caching.
+	// The stable system/tools prefix is the only boundary worth having here, so
+	// that is where the breakpoint must land.
 	var systemBlocks []map[string]json.RawMessage
 	decodeField(t, body, "system", &systemBlocks)
 	if len(systemBlocks) != 1 {
@@ -146,22 +164,26 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 	if systemText != "system instruction" {
 		t.Errorf("system text = %q, want system instruction", systemText)
 	}
-	var cacheControl map[string]string
-	decodeField(t, systemBlocks[0], "cache_control", &cacheControl)
-	if cacheControl["type"] != "ephemeral" || cacheControl["ttl"] != "5m" {
-		t.Errorf("cache_control = %#v, want ephemeral/5m", cacheControl)
+	var systemCache map[string]string
+	decodeField(t, systemBlocks[0], "cache_control", &systemCache)
+	if systemCache["type"] != "ephemeral" || systemCache["ttl"] != "5m" {
+		t.Errorf("system cache_control = %#v, want ephemeral/5m", systemCache)
 	}
 	var messages []map[string]json.RawMessage
 	decodeField(t, body, "messages", &messages)
-	if len(messages) != 2 {
-		t.Fatalf("messages = %d, want user and tool-result", len(messages))
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want user, assistant tool-use, and tool-result", len(messages))
 	}
 	var toolResult []map[string]json.RawMessage
-	decodeField(t, messages[1], "content", &toolResult)
+	decodeField(t, messages[2], "content", &toolResult)
 	var isError bool
 	decodeField(t, toolResult[0], "is_error", &isError)
 	if !isError {
 		t.Error("tool_result.is_error = false, want true")
+	}
+	// The live turn must NOT carry the breakpoint (see above).
+	if raw, exists := toolResult[0]["cache_control"]; exists {
+		t.Errorf("live turn carries cache_control = %s; the breakpoint would move every turn", raw)
 	}
 	var thinking anthropic.ThinkingOptions
 	decodeField(t, body, "thinking", &thinking)
@@ -187,7 +209,14 @@ func TestNewInvokeUsesNativeMessagesSemantics(t *testing.T) {
 
 func TestStreamDecodesNativeSSEAndUsage(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	bodyCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusInternalServerError)
+			return
+		}
+		bodyCh <- body
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4\",\"usage\":{\"input_tokens\":8,\"cache_read_input_tokens\":1,\"cache_creation_input_tokens\":0}}}\n\n")
 		_, _ = io.WriteString(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n")
@@ -201,16 +230,27 @@ func TestStreamDecodesNativeSSEAndUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	selected := model.CustomModel(model.ProviderName(llm.ProviderAnthropic), model.APIFormatAnthropic, srv.URL+"/v1", "claude-sonnet-4", model.WithThinking())
+	selected := model.CustomModel(model.ProviderName(llm.ProviderAnthropic), model.APIFormatAnthropic, srv.URL+"/v1", "claude-sonnet-4", model.WithThinkingDialect(model.ThinkingDialectAdaptive))
 	client, err := anthropic.New(selected, "sk-ant-test")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	reader, err := client.Stream(context.Background(), inference.Request{
+		Model: selected,
+		Messages: content.AgenticMessages{&content.UserMessage{Message: content.Message{
+			Role:   content.RoleUser,
+			Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
+		}}},
+	})
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
 	defer func() { _ = reader.Close() }()
+
+	// The streaming encoder is a separate mode of the same codec, so its body
+	// gets the same gate. Notably it must carry "stream":true and still satisfy
+	// CreateMessageParams, which is additionalProperties:false.
+	gateRequest(t, <-bodyCh)
 
 	var chunks []content.Chunk
 	for {

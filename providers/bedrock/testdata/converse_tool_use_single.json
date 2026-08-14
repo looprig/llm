@@ -1,0 +1,27 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_single_1",
+            "name": "search",
+            "input": {
+              "query": "conformance gate"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "stopReason": "tool_use",
+  "usage": {
+    "inputTokens": 24,
+    "outputTokens": 15,
+    "totalTokens": 39
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

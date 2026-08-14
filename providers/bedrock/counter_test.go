@@ -69,6 +69,10 @@ func TestCounterEnvelopeMatchesInvokeBody(t *testing.T) {
 			if err != nil {
 				t.Fatalf("toBedrockBody() error = %v", err)
 			}
+			// The counted body must be a legal InvokeModel body in its own
+			// right. Counting a body the invoke route would reject produces a
+			// number for a request that can never be sent.
+			gateInvokeModelAnthropicBody(t, wantInvokeBody, tt.req.Model.Name)
 			var envelope struct {
 				Input struct {
 					InvokeModel struct {
@@ -141,6 +145,10 @@ func TestCounterConverseEnvelopeUsesNativeUnion(t *testing.T) {
 	if len(envelope.Input.Converse) == 0 || string(envelope.Input.InvokeModel) != "" {
 		t.Fatalf("input union = converse:%s invokeModel:%s, want Converse only", envelope.Input.Converse, envelope.Input.InvokeModel)
 	}
+	// CountTokens' converse member is a ConverseRequest minus the fields that
+	// cannot affect an input count, so it is held to the same schema.
+	gateConverseBody(t, envelope.Input.Converse)
+
 	var converse map[string]json.RawMessage
 	if err := json.Unmarshal(envelope.Input.Converse, &converse); err != nil {
 		t.Fatalf("input.converse JSON = %v", err)

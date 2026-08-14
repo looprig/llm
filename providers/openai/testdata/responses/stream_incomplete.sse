@@ -1,0 +1,9 @@
+event: response.created
+data: {"type":"response.created","sequence_number":1,"response":{"id":"resp_s8","object":"response","created_at":1770000000,"status":"in_progress","error":null,"incomplete_details":null,"instructions":null,"model":"gpt-5","output":[],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_s8","output_index":0,"content_index":0,"delta":"Once upon a time there was a very","logprobs":[]}
+
+event: response.incomplete
+data: {"type":"response.incomplete","sequence_number":3,"response":{"id":"resp_s8","object":"response","created_at":1770000000,"status":"incomplete","error":null,"incomplete_details":{"reason":"max_output_tokens"},"instructions":null,"model":"gpt-5","output":[{"id":"msg_s8","type":"message","role":"assistant","content":[{"type":"output_text","text":"Once upon a time there was a very","annotations":[],"logprobs":[]}],"status":"incomplete"}],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1,"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":16,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":28}}}
+

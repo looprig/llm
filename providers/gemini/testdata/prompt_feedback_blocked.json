@@ -1,0 +1,21 @@
+{
+  "promptFeedback": {
+    "blockReason": "PROHIBITED_CONTENT",
+    "safetyRatings": [
+      {
+        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        "probability": "HIGH",
+        "blocked": true
+      },
+      {
+        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+        "probability": "NEGLIGIBLE"
+      }
+    ]
+  },
+  "usageMetadata": {
+    "promptTokenCount": 17,
+    "totalTokenCount": 17
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

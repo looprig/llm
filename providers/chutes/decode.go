@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync/atomic"
 
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/codec/openaiapi"
@@ -54,16 +55,26 @@ func tryDecryptErrorBody(body []byte, respDK *mlkem.DecapsulationKey768) []byte 
 	if plaintext := tryDecryptRawEnvelope(body, respDK); plaintext != nil {
 		return plaintext
 	}
-	// Couldn't decrypt. Two sub-cases:
-	//   - body is {"detail":"<opaque base64 of binary>"} — substitute a
-	//     friendly synthetic detail so chat shows actionable text.
-	//   - body is something else (raw binary, plain text, JSON without
-	//     detail, …) — leave it alone so apiError can still try its
-	//     extractors.
+	// Couldn't decrypt. Three sub-cases, and the first two must not be
+	// confused — "we could not decrypt this" is not the same claim as "this
+	// was encrypted":
+	//   - body is {"detail":"<opaque base64 of binary>"} — genuinely sealed
+	//     and lost to us. Substitute a friendly synthetic detail so chat shows
+	//     actionable text, and keep the bytes for forensics.
+	//   - body is readable text, e.g. the gateway's plaintext 429
+	//     {"detail":"Instance is at maximum capacity, try again later"} —
+	//     never encrypted in the first place. Nothing failed, the operator can
+	//     already read it, and there is nothing to analyse. Pass it through
+	//     silently.
+	//   - body is opaque bytes in some other shape — leave the bytes alone so
+	//     apiError can still try its extractors, but capture them, because an
+	//     envelope we do not recognize is exactly what the dump is for.
 	if synthetic := synthesizeOpaqueDetail(body); synthetic != nil {
 		return synthetic
 	}
-	dumpUndecryptableBody(body)
+	if isOpaque(body) {
+		dumpUndecryptableBody(body)
+	}
 	return body
 }
 
@@ -79,54 +90,90 @@ func synthesizeOpaqueDetail(body []byte) []byte {
 		return nil
 	}
 	decoded, derr := base64.StdEncoding.DecodeString(env.Detail)
-	if derr != nil || len(decoded) < 32 {
-		return nil
+	if derr != nil || !isOpaque(decoded) {
+		return nil // not base64, too short, or text after all: keep the original
 	}
-	// Heuristic: if the decoded bytes are not printable, treat as opaque.
-	// 32 bytes is enough to distinguish (binary entropy will have <50%
-	// printable; plain text or JSON will have near-100%).
-	printable := 0
-	for _, b := range decoded[:32] {
-		if (b >= 0x20 && b < 0x7f) || b == '\n' || b == '\r' || b == '\t' {
-			printable++
-		}
-	}
-	if printable >= 24 { // >= 75% printable: probably text after all, keep original
-		return nil
-	}
+	// The real message is sealed and unavailable to us, so it is unavailable to
+	// the operator too. Name the dump in the substitute detail: that file is
+	// the only remaining route to the original bytes, and an operator who reads
+	// this error in chat should not have to know the dump exists to find it.
 	msg := fmt.Sprintf(
 		"chutes returned an opaque encrypted error (%d bytes, client cannot decrypt). "+
 			"Most common cause: prompt exceeded the model's context window. "+
 			"Run a smaller prompt or check the model's context_length on /v1/models.",
 		len(decoded),
 	)
+	if path := dumpUndecryptableBody(body); path != "" {
+		msg += " Raw bytes: " + path
+	}
 	out, err := json.Marshal(map[string]string{"detail": msg})
 	if err != nil {
 		return nil
 	}
-	dumpUndecryptableBody(body) // still capture forensics in case the heuristic was wrong
 	return out
+}
+
+// isOpaque reports whether b looks like binary rather than text, and is the
+// single test for "there is something here a maintainer would need the raw
+// bytes to understand". 32 bytes is enough to distinguish: binary entropy
+// leaves well under 75% of them printable, while text or JSON is at ~100%.
+// Anything shorter than that is too small to judge and is treated as text.
+func isOpaque(b []byte) bool {
+	if len(b) < 32 {
+		return false
+	}
+	printable := 0
+	for _, c := range b[:32] {
+		if (c >= 0x20 && c < 0x7f) || c == '\n' || c == '\r' || c == '\t' {
+			printable++
+		}
+	}
+	return printable < 24
 }
 
 // maxDumpBodySize caps how much of an undecryptable body we write to disk.
 // Prevents an adversarially large response from filling the temp filesystem.
 const maxDumpBodySize = 1 << 20 // 1 MiB
 
-// dumpUndecryptableBody persists a body we couldn't decrypt to a unique temp
-// file and logs the location. Cheap forensics: lets a maintainer compare the
-// real wire format against our assumed envelope. Best-effort; any IO failure
-// is silently ignored (we still surface the raw body to the caller).
-func dumpUndecryptableBody(body []byte) {
+// maxDumps caps how many undecryptable bodies one process leaves in the temp
+// directory. A size limit alone bounds each file, not the count: a long-lived
+// agent that keeps hitting a sealed 4xx would otherwise accumulate a new pair of
+// files per request, forever, with nothing to clean them up. A handful of
+// samples is all the forensics this is for — they are all the same bytes after
+// the first.
+const maxDumps = 8
+
+// dumpCount tracks dumps against maxDumps for the life of the process.
+var dumpCount atomic.Int64
+
+// dumpUndecryptableBody persists a sealed body we couldn't open to a unique
+// temp file and returns its path (empty if nothing was written). Cheap
+// forensics: lets a maintainer compare the real wire format against our assumed
+// envelope. Best-effort; any IO failure is silently ignored (we still surface
+// the body to the caller).
+//
+// Callers must have established that the body really is opaque — see isOpaque.
+// Nothing here deletes these files, so both dimensions are bounded up front:
+// maxDumpBodySize per file, maxDumps per process.
+func dumpUndecryptableBody(body []byte) string {
 	if len(body) > maxDumpBodySize {
 		slog.Warn("chutes: error body decryption failed; body too large to dump",
 			"size", len(body),
 			"limit", maxDumpBodySize,
 		)
-		return
+		return ""
+	}
+	if n := dumpCount.Add(1); n > maxDumps {
+		if n == maxDumps+1 {
+			slog.Warn("chutes: error body decryption failed; dump limit reached, not writing more",
+				"limit", maxDumps,
+			)
+		}
+		return ""
 	}
 	f, err := os.CreateTemp("", "chutes-undecryptable-*.bin")
 	if err != nil {
-		return
+		return ""
 	}
 	_, _ = f.Write(body)
 	_ = f.Close()
@@ -134,8 +181,14 @@ func dumpUndecryptableBody(body []byte) {
 		"path", f.Name(),
 		"size", len(body),
 	)
-	// If body is JSON with a base64 detail, also dump the decoded inner bytes
-	// so we don't have to chain `jq .detail | base64 -d` to inspect them.
+	dumpDecodedDetail(body)
+	return f.Name()
+}
+
+// dumpDecodedDetail writes the base64-decoded `detail` of a JSON-wrapped body
+// alongside the raw dump, so inspecting it does not mean chaining
+// `jq .detail | base64 -d`. It shares the caller's slot against maxDumps.
+func dumpDecodedDetail(body []byte) {
 	var env struct {
 		Detail string `json:"detail"`
 	}

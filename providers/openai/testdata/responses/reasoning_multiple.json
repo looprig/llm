@@ -1,0 +1,68 @@
+{
+  "id": "resp_reasoning_multiple",
+  "object": "response",
+  "created_at": 1770000000,
+  "status": "completed",
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "model": "gpt-5",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs_first",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Step one."
+        }
+      ],
+      "encrypted_content": "blob-one",
+      "status": "completed"
+    },
+    {
+      "type": "reasoning",
+      "id": "rs_second",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Step two."
+        }
+      ],
+      "encrypted_content": "blob-two",
+      "status": "completed"
+    },
+    {
+      "id": "msg_6",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Both steps done.",
+          "annotations": [],
+          "logprobs": []
+        }
+      ],
+      "status": "completed"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "metadata": {},
+  "tool_choice": "auto",
+  "tools": [],
+  "temperature": 1,
+  "top_p": 1,
+  "usage": {
+    "input_tokens": 30,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "output_tokens": 44,
+    "output_tokens_details": {
+      "reasoning_tokens": 30
+    },
+    "total_tokens": 74
+  }
+}

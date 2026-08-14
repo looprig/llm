@@ -1,0 +1,22 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "video": {
+            "format": "mp4",
+            "source": {
+              "s3Location": {
+                "uri": "s3://example-bucket/clip.mp4"
+              }
+            }
+          }
+        },
+        {
+          "text": "Describe this clip."
+        }
+      ]
+    }
+  ]
+}

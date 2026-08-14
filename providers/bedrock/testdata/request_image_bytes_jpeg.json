@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "jpeg",
+            "source": {
+              "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD/2Q=="
+            }
+          }
+        },
+        {
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

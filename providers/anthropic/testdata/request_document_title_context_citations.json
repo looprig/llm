@@ -1,0 +1,28 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "base64",
+            "media_type": "application/pdf",
+            "data": "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK"
+          },
+          "title": "Q3 Report",
+          "context": "Internal finance report for Q3.",
+          "citations": {
+            "enabled": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Cite the revenue figure."
+        }
+      ]
+    }
+  ]
+}

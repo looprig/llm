@@ -1,0 +1,49 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "thought": true,
+            "text": "Pick the tool.",
+            "thoughtSignature": "CoIBAVSoXO92ZXJ0ZXgtc2lnLW9uZQ=="
+          },
+          {
+            "thoughtSignature": "CoIBAVSoXO92ZXJ0ZXgtc2lnLXR3bw==",
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Oslo"
+              }
+            }
+          },
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Bergen"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0,
+      "safetyRatings": [
+        {
+          "category": "HARM_CATEGORY_HARASSMENT",
+          "probability": "NEGLIGIBLE"
+        }
+      ]
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 55,
+    "candidatesTokenCount": 18,
+    "thoughtsTokenCount": 12,
+    "totalTokenCount": 85
+  },
+  "modelVersion": "gemini-2.5-pro",
+  "responseId": "vertex-l5CVaLPqE4mVz7IPtorGmAo"
+}

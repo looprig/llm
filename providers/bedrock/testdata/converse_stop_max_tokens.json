@@ -1,0 +1,21 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "The list begins with alpha, beta, gam"
+        }
+      ]
+    }
+  },
+  "stopReason": "max_tokens",
+  "usage": {
+    "inputTokens": 44,
+    "outputTokens": 1024,
+    "totalTokens": 1068
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

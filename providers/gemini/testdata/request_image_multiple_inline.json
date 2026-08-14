@@ -1,0 +1,31 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "inlineData": {
+            "data": "iVBORw0KGgo=",
+            "mimeType": "image/png"
+          }
+        },
+        {
+          "inlineData": {
+            "data": "UklGRgAAAABXRUJQVlA4IA==",
+            "mimeType": "image/webp"
+          }
+        },
+        {
+          "text": "Which is sharper?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You compare images."
+      }
+    ]
+  }
+}

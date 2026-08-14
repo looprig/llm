@@ -1,0 +1,59 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Weather in Oslo and Bergen?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "args": {
+              "city": "Oslo"
+            },
+            "name": "get_weather"
+          }
+        },
+        {
+          "functionCall": {
+            "args": {
+              "city": "Bergen"
+            },
+            "name": "get_weather"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "get_weather",
+            "response": {
+              "result": "4 degrees celsius"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "get_weather",
+            "response": {
+              "result": "6 degrees celsius"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

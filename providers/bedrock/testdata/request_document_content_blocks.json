@@ -1,0 +1,32 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "document": {
+            "format": "md",
+            "name": "readme",
+            "source": {
+              "content": [
+                {
+                  "text": "# Title"
+                },
+                {
+                  "text": "body"
+                }
+              ]
+            },
+            "context": "Project readme",
+            "citations": {
+              "enabled": true
+            }
+          }
+        },
+        {
+          "text": "Summarise this document."
+        }
+      ]
+    }
+  ]
+}

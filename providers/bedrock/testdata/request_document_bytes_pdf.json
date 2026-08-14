@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "document": {
+            "format": "pdf",
+            "name": "q3 report",
+            "source": {
+              "bytes": "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK"
+            }
+          }
+        },
+        {
+          "text": "Summarise this PDF."
+        }
+      ]
+    }
+  ]
+}

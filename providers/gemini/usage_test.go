@@ -48,7 +48,8 @@ func TestGeminiStreamUsageResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gateSentRequest(t, r)
 				w.Header().Set("Content-Type", "text/event-stream")
 				fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello\"}]}}]}\n\n")
 				fmt.Fprint(w, "data: "+tt.terminal+"\n\n")

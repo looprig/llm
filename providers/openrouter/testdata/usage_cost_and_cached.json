@@ -1,0 +1,34 @@
+{
+  "id": "or-5",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Paris.",
+        "refusal": null
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 31,
+    "completion_tokens": 9,
+    "total_tokens": 40,
+    "prompt_tokens_details": {
+      "cached_tokens": 24
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 5
+    },
+    "cost": 0.000123,
+    "cost_details": {
+      "upstream_inference_cost": 0.000101
+    },
+    "is_byok": false
+  }
+}

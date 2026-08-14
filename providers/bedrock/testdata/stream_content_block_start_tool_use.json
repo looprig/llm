@@ -1,0 +1,11 @@
+{
+  "contentBlockStart": {
+    "contentBlockIndex": 1,
+    "start": {
+      "toolUse": {
+        "toolUseId": "tooluse_weather_1",
+        "name": "get_weather"
+      }
+    }
+  }
+}

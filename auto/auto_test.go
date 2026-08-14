@@ -89,7 +89,7 @@ func openAIResponsesModel(name string) model.Model {
 }
 
 func anthropicMessagesModel(name string) model.Model {
-	return model.CustomModel(model.ProviderName(llm.ProviderAnthropic), model.APIFormatAnthropic, "https://api.anthropic.com/v1", name, model.WithTools(), model.WithThinking())
+	return model.CustomModel(model.ProviderName(llm.ProviderAnthropic), model.APIFormatAnthropic, "https://api.anthropic.com/v1", name, model.WithTools(), model.WithThinkingDialect(model.ThinkingDialectAdaptive))
 }
 
 func xAIResponsesModel(name string) model.Model {

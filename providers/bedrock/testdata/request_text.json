@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "What is the weather in Paris?"
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "text": "You are precise."
+    }
+  ],
+  "inferenceConfig": {
+    "maxTokens": 1024,
+    "temperature": 0.2
+  }
+}

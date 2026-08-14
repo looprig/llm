@@ -1,0 +1,41 @@
+{
+  "id": "chatcmpl-acs-3",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "gpt-4o-2024-11-20",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null
+      },
+      "finish_reason": "content_filter",
+      "logprobs": null,
+      "content_filter_results": {
+        "hate": {
+          "filtered": false,
+          "severity": "safe"
+        },
+        "self_harm": {
+          "filtered": false,
+          "severity": "safe"
+        },
+        "sexual": {
+          "filtered": false,
+          "severity": "safe"
+        },
+        "violence": {
+          "filtered": true,
+          "severity": "medium"
+        }
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 0,
+    "total_tokens": 20
+  }
+}

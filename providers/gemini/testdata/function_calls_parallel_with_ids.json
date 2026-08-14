@@ -1,0 +1,37 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "id": "call_oslo_01",
+              "name": "get_weather",
+              "args": {
+                "city": "Oslo"
+              }
+            }
+          },
+          {
+            "functionCall": {
+              "id": "call_bergen_02",
+              "name": "get_weather",
+              "args": {
+                "city": "Bergen"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 55,
+    "candidatesTokenCount": 18,
+    "totalTokenCount": 73
+  },
+  "modelVersion": "gemini-2.5-pro"
+}

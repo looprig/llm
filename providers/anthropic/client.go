@@ -94,7 +94,14 @@ type requestCodec struct {
 var _ codec.StreamingCodec = requestCodec{}
 
 func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMode) (codec.EncodedRequest, error) {
-	encoded, err := (anthropicapi.Codec{}).EncodeRequest(req, mode)
+	encodedReq := req
+	if c.config.cacheControl != nil {
+		// Let the shared codec compute the block-accurate committed boundary.
+		// The provider option replaces the marker's value below, but must not
+		// re-derive a projected boundary from neutral message cardinality.
+		encodedReq.Model.Caps.PromptCaching = true
+	}
+	encoded, err := (anthropicapi.Codec{}).EncodeRequest(encodedReq, mode)
 	if err != nil {
 		return codec.EncodedRequest{}, err
 	}
@@ -143,7 +150,16 @@ func (c requestCodec) EncodeRequest(req inference.Request, mode codec.RequestMod
 		}
 	}
 	if c.config.cacheControl != nil {
-		if err := applySystemCacheControl(body, *c.config.cacheControl); err != nil {
+		committedSource := len(req.Messages) - req.TransientMessages
+		for index, message := range req.Messages {
+			if index >= committedSource {
+				if _, system := message.(*content.SystemMessage); system {
+					return codec.EncodedRequest{}, &OptionError{Reason: "prompt cache control cannot precede transient system context"}
+				}
+				continue
+			}
+		}
+		if err := applyPromptCacheControl(body, *c.config.cacheControl, req.TransientMessages > 0); err != nil {
 			return codec.EncodedRequest{}, err
 		}
 	}
@@ -167,49 +183,113 @@ func (c requestCodec) hasBodyOptions() bool {
 	return c.config.thinking != nil || c.config.metadataUserID != "" || c.config.cacheControl != nil
 }
 
-func applySystemCacheControl(body map[string]json.RawMessage, control CacheControlOptions) error {
+func applyPromptCacheControl(body map[string]json.RawMessage, control CacheControlOptions, preferMessageBoundary bool) error {
+	if control.Type == "" {
+		control.Type = "ephemeral"
+	}
+	if control.Type != "ephemeral" {
+		return &OptionError{Reason: "cache control type must be ephemeral"}
+	}
+	if control.TTL != "" && control.TTL != "5m" && control.TTL != "1h" {
+		return &OptionError{Reason: "cache control TTL must be 5m or 1h"}
+	}
 	cacheRaw, err := json.Marshal(control)
 	if err != nil {
-		return fmt.Errorf("anthropic: encode cache control: %w", err)
+		return &OptionError{Reason: "encode cache control", Err: err}
 	}
-	if rawSystem, ok := body["system"]; ok {
-		var text string
-		if err := json.Unmarshal(rawSystem, &text); err == nil && text != "" {
-			block := map[string]json.RawMessage{}
-			block["type"], _ = json.Marshal("text")
-			block["text"], _ = json.Marshal(text)
-			block["cache_control"] = cacheRaw
-			body["system"], err = json.Marshal([]map[string]json.RawMessage{block})
-			if err != nil {
-				return fmt.Errorf("anthropic: encode cached system prompt: %w", err)
-			}
-			return nil
-		}
-	}
-	// If no system prompt exists, place the boundary on the final content block
-	// (the native Anthropic cache-control location for a conversation prefix).
+
+	// Explicit policy replaces any codec capability breakpoints, so a request
+	// never carries contradictory automatic and explicit boundaries.
 	if rawMessages, ok := body["messages"]; ok {
 		var messages []map[string]json.RawMessage
-		if err := json.Unmarshal(rawMessages, &messages); err == nil {
-			for index := len(messages) - 1; index >= 0; index-- {
-				var blocks []map[string]json.RawMessage
-				if err := json.Unmarshal(messages[index]["content"], &blocks); err != nil || len(blocks) == 0 {
-					continue
-				}
-				blocks[len(blocks)-1]["cache_control"] = cacheRaw
-				messages[index]["content"], err = json.Marshal(blocks)
-				if err != nil {
-					return fmt.Errorf("anthropic: encode cached message: %w", err)
-				}
-				body["messages"], err = json.Marshal(messages)
-				if err != nil {
-					return fmt.Errorf("anthropic: encode cached messages: %w", err)
-				}
-				return nil
-			}
+		if err := json.Unmarshal(rawMessages, &messages); err != nil {
+			return &OptionError{Reason: "decode messages for cache control", Err: err}
 		}
+		boundaryMessage, boundaryBlock := -1, -1
+		for index := range messages {
+			var blocks []map[string]json.RawMessage
+			if err := json.Unmarshal(messages[index]["content"], &blocks); err != nil {
+				return &OptionError{Reason: "decode message content for cache control", Err: err}
+			}
+			for blockIndex := range blocks {
+				if _, marked := blocks[blockIndex]["cache_control"]; marked {
+					boundaryMessage, boundaryBlock = index, blockIndex
+				}
+				delete(blocks[blockIndex], "cache_control")
+			}
+			messages[index]["content"], _ = json.Marshal(blocks)
+		}
+		// A message breakpoint is only worth writing when it sits BEFORE
+		// something transient. When committedMessages == len(messages) —
+		// which is the zero value of Request.TransientMessages, and therefore
+		// the default — the "last committed message" IS the live turn: its
+		// content differs on every request, so the breakpoint moves every
+		// turn, writing a fresh cache entry and reading none, and the codec's
+		// stable system/tools breakpoint would be cleared on the way out. That
+		// is strictly worse than not caching at all, so fall through to the
+		// system branch, where the prefix is genuinely stable.
+		if preferMessageBoundary && boundaryMessage >= 0 {
+			var blocks []map[string]json.RawMessage
+			_ = json.Unmarshal(messages[boundaryMessage]["content"], &blocks)
+			blocks[boundaryBlock]["cache_control"] = cacheRaw
+			messages[boundaryMessage]["content"], _ = json.Marshal(blocks)
+			body["messages"], err = json.Marshal(messages)
+			if err != nil {
+				return &OptionError{Reason: "encode cached messages", Err: err}
+			}
+			return clearSystemCacheControls(body)
+		}
+		body["messages"], _ = json.Marshal(messages)
 	}
-	return fmt.Errorf("anthropic: prompt cache control requires a non-empty system prompt or message")
+	if err := clearSystemCacheControls(body); err != nil {
+		return err
+	}
+	rawSystem, ok := body["system"]
+	if !ok {
+		return &OptionError{Reason: "prompt cache control requires a committed message or non-empty system prompt"}
+	}
+	var text string
+	if json.Unmarshal(rawSystem, &text) == nil {
+		if text == "" {
+			return &OptionError{Reason: "prompt cache control requires a non-empty system prompt"}
+		}
+		block := map[string]json.RawMessage{"cache_control": cacheRaw}
+		block["type"], _ = json.Marshal("text")
+		block["text"], _ = json.Marshal(text)
+		body["system"], err = json.Marshal([]map[string]json.RawMessage{block})
+		return err
+	}
+	var blocks []map[string]json.RawMessage
+	if err := json.Unmarshal(rawSystem, &blocks); err != nil || len(blocks) == 0 {
+		return &OptionError{Reason: "decode system for cache control", Err: err}
+	}
+	blocks[len(blocks)-1]["cache_control"] = cacheRaw
+	body["system"], err = json.Marshal(blocks)
+	if err != nil {
+		return &OptionError{Reason: "encode cached system", Err: err}
+	}
+	return nil
+}
+
+func clearSystemCacheControls(body map[string]json.RawMessage) error {
+	rawSystem, ok := body["system"]
+	if !ok {
+		return nil
+	}
+	var blocks []map[string]json.RawMessage
+	if err := json.Unmarshal(rawSystem, &blocks); err != nil {
+		// A string system has no block-level cache_control to remove.
+		return nil
+	}
+	for index := range blocks {
+		delete(blocks[index], "cache_control")
+	}
+	encoded, err := json.Marshal(blocks)
+	if err != nil {
+		return &OptionError{Reason: "encode system cache controls", Err: err}
+	}
+	body["system"] = encoded
+	return nil
 }
 
 func (requestCodec) DecodeResponse(body []byte) (*inference.Response, error) {

@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Oslo is 4 degrees."}]},"index":0}],"modelVersion":"gemini-2.5-flash"}
+
+data: {"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":6,"thoughtsTokenCount":0,"totalTokenCount":18}}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"index":0,"finishReason":"STOP"}],"modelVersion":"gemini-2.5-flash"}
+

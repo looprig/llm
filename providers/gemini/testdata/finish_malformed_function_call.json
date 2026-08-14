@@ -1,0 +1,19 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": []
+      },
+      "finishReason": "MALFORMED_FUNCTION_CALL",
+      "index": 0,
+      "finishMessage": "Malformed function call: get_weather(city=)"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

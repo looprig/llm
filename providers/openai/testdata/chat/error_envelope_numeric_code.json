@@ -1,0 +1,13 @@
+{
+  "id": "chatcmpl-error-numeric",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [],
+  "error": {
+    "code": 429,
+    "type": "rate_limit_error",
+    "message": "Provider returned error",
+    "param": null
+  }
+}

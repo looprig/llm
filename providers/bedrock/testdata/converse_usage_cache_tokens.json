@@ -1,0 +1,23 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "Cached prefix reply."
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 6,
+    "outputTokens": 21,
+    "totalTokens": 27,
+    "cacheReadInputTokens": 8192,
+    "cacheWriteInputTokens": 1024
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

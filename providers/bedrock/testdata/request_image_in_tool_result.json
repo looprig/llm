@@ -1,0 +1,62 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "Screenshot the page."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_shot_1",
+            "name": "screenshot",
+            "input": {}
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "toolResult": {
+            "toolUseId": "tooluse_shot_1",
+            "status": "success",
+            "content": [
+              {
+                "text": "captured"
+              },
+              {
+                "image": {
+                  "format": "png",
+                  "source": {
+                    "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAACAAEABf4C+gAAAABJRU5ErkJggg=="
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "name": "screenshot",
+          "inputSchema": {
+            "json": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

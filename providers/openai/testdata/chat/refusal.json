@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-refusal",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": "I'm sorry, I can't help with that request."
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 24,
+    "completion_tokens": 11,
+    "total_tokens": 35
+  }
+}

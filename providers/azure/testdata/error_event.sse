@@ -1,0 +1,5 @@
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":0,"item_id":"msg_az_11","output_index":0,"content_index":0,"delta":"Sure, here is","logprobs":[]}
+
+event: error
+data: {"type":"error","code":"server_error","message":"The service encountered an unrecoverable error.","param":null,"sequence_number":1}

@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "fileData": {
+            "mimeType": "application/pdf",
+            "fileUri": "https://generativelanguage.googleapis.com/v1beta/files/contract-9f2a"
+          }
+        },
+        {
+          "text": "List the parties."
+        }
+      ]
+    }
+  ]
+}

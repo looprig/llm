@@ -1,0 +1,22 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "url": "https://example.com/report.pdf"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Summarise this PDF."
+        }
+      ]
+    }
+  ]
+}

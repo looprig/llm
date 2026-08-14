@@ -1,0 +1,33 @@
+{
+  "id": "chatcmpl-tool-empty-args",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_noargs",
+            "type": "function",
+            "function": {
+              "name": "list_files",
+              "arguments": ""
+            }
+          }
+        ]
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 40,
+    "completion_tokens": 6,
+    "total_tokens": 46
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": []
+      },
+      "finishReason": "MISSING_THOUGHT_SIGNATURE",
+      "index": 0,
+      "finishMessage": "A thought signature was required on the replayed turn and was absent."
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

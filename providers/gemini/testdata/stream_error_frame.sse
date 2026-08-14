@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"The forecast "}]},"index":0}],"modelVersion":"gemini-2.5-flash"}
+
+data: {"error":{"code":500,"message":"Internal error encountered.","status":"INTERNAL"}}
+

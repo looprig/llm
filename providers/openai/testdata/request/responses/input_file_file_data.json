@@ -1,0 +1,20 @@
+{
+  "model": "gpt-5",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Summarize the attached report."
+        },
+        {
+          "type": "input_file",
+          "filename": "report.pdf",
+          "file_data": "JVBERi0xLjQK"
+        }
+      ]
+    }
+  ]
+}

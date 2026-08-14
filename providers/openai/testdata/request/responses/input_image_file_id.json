@@ -1,0 +1,20 @@
+{
+  "model": "gpt-5",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Describe the uploaded image."
+        },
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "file_id": "file-img123"
+        }
+      ]
+    }
+  ]
+}

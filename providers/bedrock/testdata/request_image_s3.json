@@ -1,0 +1,23 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "png",
+            "source": {
+              "s3Location": {
+                "uri": "s3://example-bucket/diagram.png",
+                "bucketOwner": "123456789012"
+              }
+            }
+          }
+        },
+        {
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

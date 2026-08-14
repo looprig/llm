@@ -1,0 +1,34 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Weather in Oslo?"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "get_weather",
+          "description": "Look up a forecast",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "city": {
+                "type": "STRING",
+                "description": "City name"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

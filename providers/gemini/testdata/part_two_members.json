@@ -1,0 +1,23 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "here is the chart",
+            "functionCall": {
+              "name": "render_chart",
+              "args": {
+                "kind": "bar"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-flash"
+}

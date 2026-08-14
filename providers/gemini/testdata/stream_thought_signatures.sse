@@ -1,0 +1,8 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"Identify the city.","thoughtSignature":"CoEBAVSoXO9zdHJlYW0tc2lnLW9uZQ=="}]},"index":0}],"modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"Look up the forecast.","thoughtSignature":"CoEBAVSoXO9zdHJlYW0tc2lnLXR3bw=="}]},"index":0}],"modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"thought":true,"thoughtSignature":"CoMBAVSoXO9zdHJlYW0tc2lnLXRocmVl"}]},"index":0}],"modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"4 degrees celsius."}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":5,"thoughtsTokenCount":41,"totalTokenCount":58},"modelVersion":"gemini-2.5-pro"}
+

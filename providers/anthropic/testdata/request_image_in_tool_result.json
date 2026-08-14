@@ -1,0 +1,57 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Screenshot the page."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01Shot",
+          "name": "screenshot",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_01Shot",
+          "content": [
+            {
+              "type": "text",
+              "text": "captured"
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAACAAEABf4C+gAAAABJRU5ErkJggg=="
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "screenshot",
+      "input_schema": {
+        "type": "object"
+      }
+    }
+  ]
+}

@@ -26,7 +26,7 @@ func TestCounterCountContext(t *testing.T) {
 		"",
 		"claude-sonnet-4",
 		model.WithTools(),
-		model.WithThinking(),
+		model.WithThinkingDialect(model.ThinkingDialectAdaptive),
 		model.WithSampling(model.Sampling{Effort: model.EffortHigh}),
 	)
 	req := inference.Request{
@@ -70,8 +70,15 @@ func TestCounterCountContext(t *testing.T) {
 		t.Errorf("CountContext() = %+v, want %+v", got, want)
 	}
 
+	raw := <-bodyCh
+	// Gate the count body before asserting on it: the count preflight is the
+	// same encoder with a field projection over it, so a projection that
+	// mangled a message or leaked a generation field is a schema violation
+	// first and a field-name assertion second.
+	gateCountTokensBody(t, raw)
+
 	var body map[string]json.RawMessage
-	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("request body JSON error = %v", err)
 	}
 	for _, field := range []string{"model", "system", "messages", "tools"} {

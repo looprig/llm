@@ -2,6 +2,21 @@ package anthropic
 
 import "fmt"
 
+// OptionError reports a local provider-option encoding failure.
+type OptionError struct {
+	Reason string
+	Err    error
+}
+
+func (e *OptionError) Error() string {
+	if e.Err != nil {
+		return "anthropic: " + e.Reason + ": " + e.Err.Error()
+	}
+	return "anthropic: " + e.Reason
+}
+
+func (e *OptionError) Unwrap() error { return e.Err }
+
 type CounterStateReason string
 
 const (

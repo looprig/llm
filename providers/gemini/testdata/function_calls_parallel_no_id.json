@@ -1,0 +1,43 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Oslo"
+              }
+            }
+          },
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Bergen"
+              }
+            }
+          },
+          {
+            "functionCall": {
+              "name": "get_time",
+              "args": {
+                "zone": "Europe/Oslo"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 55,
+    "candidatesTokenCount": 24,
+    "totalTokenCount": 79
+  },
+  "modelVersion": "gemini-2.5-pro"
+}

@@ -8,9 +8,13 @@ import (
 )
 
 // errSSEDone is the terminal signal returned by sseEventReader.next when it
-// reads the literal `data: [DONE]` payload. Callers treat it like a clean end
-// of stream (distinct from io.EOF, which means the connection closed without a
-// [DONE]; the Chutes capture is cut at max_tokens and ends that way).
+// reads the literal `data: [DONE]` payload. It is deliberately distinct from
+// io.EOF: [DONE] is a terminal the gateway sent, while io.EOF only says the
+// body stopped arriving — which happens both on a legitimate completion the
+// gateway did not punctuate (the Chutes capture cut at max_tokens ends that
+// way, its final sealed chunk carrying finish_reason "length") and on a
+// connection dropped mid-generation. stream.go must not collapse the two; see
+// relayTerminal and finishUnterminated.
 var errSSEDone = errors.New("sse: [DONE]")
 
 // sseEventReader is an SSE reader that yields the full accumulated `data:`
@@ -65,11 +69,29 @@ func (s *sseEventReader) next() (string, error) {
 		}
 		// event:, id:, retry: and any other field are ignored.
 	}
-	if err := s.sc.Err(); err != nil {
+	// bufio.Scanner suppresses only a BARE io.EOF: Scanner.Err compares with ==,
+	// so a body that reports its end of input wrapped surfaces here as a scan
+	// error rather than as nothing. A genuine mid-stream fault still short-
+	// circuits — flushing a partial event under one would hand the decoder
+	// truncated JSON and report a dropped connection as a parse failure — but an
+	// EOF, however it is wrapped, must not, because it is the ordinary way a
+	// pending partial event ends and that event is routinely the last one,
+	// carrying finish_reason. Checking the error before the flush discarded it
+	// and turned a completed generation into a truncated one.
+	//
+	// The wrapped error is returned as-is rather than flattened to io.EOF: it is
+	// still a terminal, its framing context may matter to a caller, and pump
+	// classifies it with errors.Is precisely so it does not have to be flattened
+	// here.
+	err := s.sc.Err()
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
 	if have {
 		return finishEvent(data.String())
+	}
+	if err != nil {
+		return "", err
 	}
 	return "", io.EOF
 }

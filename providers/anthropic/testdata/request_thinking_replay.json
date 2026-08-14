@@ -1,0 +1,48 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Continue."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "ErUBCkYIBRgCIkDGZk3nzY1Ck0Z9tGmH5cV9pQd8bB0oS3ib9nSSPCa2Zx8T7hUeQyL2mF3aQ0kX9pRcNvJ8sHtYb1cWqEoDEgxKZ0lQvXHRk3TnJ2gaDNz2Q1n9nUuVYQmZ0SIwHkK"
+        },
+        {
+          "type": "redacted_thinking",
+          "data": "cmVkYWN0ZWQtcmVhc29uaW5nLWNpcGhlcnRleHQ="
+        },
+        {
+          "type": "text",
+          "text": "Continuing."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Thanks."
+        }
+      ]
+    }
+  ],
+  "thinking": {
+    "type": "adaptive"
+  },
+  "output_config": {
+    "effort": "high"
+  }
+}

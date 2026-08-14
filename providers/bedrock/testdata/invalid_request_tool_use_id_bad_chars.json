@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tooluse/weather 1",
+            "name": "search",
+            "input": {}
+          }
+        }
+      ]
+    }
+  ]
+}

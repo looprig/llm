@@ -1,0 +1,106 @@
+[
+  {
+    "messageStart": {
+      "role": "assistant"
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+        "reasoningContent": {
+          "text": "Weather needs the tool."
+        }
+      }
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+        "reasoningContent": {
+          "signature": "ErUBCkYIBRgCIkDGZk3nzY1Ck0Z9tGmH5cV9pQd8bB0oS3ib9nSSPCa2Zx8T7hUeQyL2mF3aQ0kX9pRcNvJ8sHtYb1cWqEoDEgxKZ0lQvXHRk3TnJ2gaDNz2Q1n9nUuVYQmZ0SIwHkK"
+        }
+      }
+    }
+  },
+  {
+    "contentBlockStop": {
+      "contentBlockIndex": 0
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+        "text": "Checking Paris"
+      }
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+        "text": " now."
+      }
+    }
+  },
+  {
+    "contentBlockStop": {
+      "contentBlockIndex": 1
+    }
+  },
+  {
+    "contentBlockStart": {
+      "contentBlockIndex": 2,
+      "start": {
+        "toolUse": {
+          "toolUseId": "tooluse_weather_1",
+          "name": "get_weather"
+        }
+      }
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 2,
+      "delta": {
+        "toolUse": {
+          "input": "{\"city\":"
+        }
+      }
+    }
+  },
+  {
+    "contentBlockDelta": {
+      "contentBlockIndex": 2,
+      "delta": {
+        "toolUse": {
+          "input": "\"Paris\"}"
+        }
+      }
+    }
+  },
+  {
+    "contentBlockStop": {
+      "contentBlockIndex": 2
+    }
+  },
+  {
+    "messageStop": {
+      "stopReason": "tool_use"
+    }
+  },
+  {
+    "metadata": {
+      "usage": {
+        "inputTokens": 27,
+        "outputTokens": 84,
+        "totalTokens": 111
+      },
+      "metrics": {
+        "latencyMs": 1240
+      }
+    }
+  }
+]

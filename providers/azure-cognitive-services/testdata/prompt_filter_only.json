@@ -1,0 +1,29 @@
+{
+  "id": "chatcmpl-acs-5",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "gpt-4o-2024-11-20",
+  "prompt_filter_results": [
+    {
+      "prompt_index": 0,
+      "content_filter_results": {
+        "jailbreak": {
+          "filtered": false,
+          "detected": false
+        }
+      }
+    }
+  ],
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "ok",
+        "refusal": null
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ]
+}

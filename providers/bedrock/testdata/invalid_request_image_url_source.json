@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "png",
+            "source": {
+              "url": "https://example.com/diagram.png"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

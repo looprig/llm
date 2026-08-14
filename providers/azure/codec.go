@@ -22,6 +22,10 @@ const (
 	eventReasoningTextDelta    = "response.reasoning_text.delta"
 	eventReasoningDelta        = "response.reasoning.delta"
 	eventReasoningSummaryDelta = "response.reasoning_summary.delta"
+	// eventError is the spec's ResponseErrorEvent: a top-level `type:"error"`
+	// frame carrying code/message/param directly, with no enclosing `response`
+	// object, so it never reaches the response.failed arm.
+	eventError = "error"
 
 	contentTypeReasoningText = "reasoning_text"
 	itemTypeMessage          = "message"
@@ -346,10 +350,23 @@ func addInclude(raw json.RawMessage, want string) (json.RawMessage, error) {
 	return json.Marshal(include)
 }
 
+// streamEvent is the union view of one de-framed Responses SSE frame this fork
+// inspects. Code and Message are ResponseErrorEvent's top-level members: that
+// event carries them directly rather than inside a `response` object, and Code
+// is nullable in the spec, so it simply decodes to "".
 type streamEvent struct {
-	Type     string          `json:"type"`
-	Delta    json.RawMessage `json:"delta"`
-	Response json.RawMessage `json:"response"`
+	Type string `json:"type"`
+	// OutputIndex is the reasoning item's position in the response's output
+	// array. It is load-bearing, not decoration: streamaccumulator keys
+	// thinking parts by it, so leaving it at zero folds every reasoning item
+	// into one block whose signature is whichever arrived last. The shared
+	// collector reads the same field (openairesponses/stream.go), and this
+	// fork must stay behaviourally identical to it.
+	OutputIndex int             `json:"output_index"`
+	Delta       json.RawMessage `json:"delta"`
+	Response    json.RawMessage `json:"response"`
+	Code        string          `json:"code"`
+	Message     string          `json:"message"`
 }
 
 type streamCollector struct {
@@ -366,25 +383,70 @@ func decodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], err
 	return stream.FramesToChunksWithResult(frames, collector.mapFrame, collector.resultValue), nil
 }
 
+// mapFrame is a PRIVATE FORK of openairesponses' streamResultCollector.mapFrame.
+//
+// WHAT AZURE DOES DIFFERENTLY, and why the shared collector cannot serve it:
+//
+//   - Azure emits reasoning as `response.reasoning_text.delta` /
+//     `response.reasoning.delta` / `response.reasoning_summary.delta`. The
+//     shared codec routes only `response.reasoning_summary_text.delta`, so
+//     those three deltas would be tolerantly skipped and the reasoning stream
+//     would arrive empty.
+//   - Azure terminates a content-filtered turn as `response.incomplete` with
+//     `incomplete_details.reason: "content_filter"`. The shared collector's
+//     deriveFinishReason maps "incomplete" to a length-style finish, which
+//     would report a suppressed answer as a merely truncated one; this fork
+//     runs the terminal envelope back through decodeResponse (which applies
+//     the same normalization the non-streaming path applies) instead.
+//
+// PRIMARY SOURCE: Microsoft Learn, "Azure OpenAI Responses API"
+// (learn.microsoft.com/azure/ai-foundry/openai/how-to/responses) documents the
+// reasoning-item shape and the content-filter termination; the base event
+// vocabulary is OpenAI's own openai-openapi Responses stream_event union, which
+// gates every fixture in delta_test.go.
+//
+// WHAT WOULD LET THIS FORK BE DELETED: a seam on the shared codec for
+// (a) additional reasoning-delta event names and (b) a provider hook on the
+// terminal envelope's finish-reason derivation. With both, Azure would be a
+// thin option set over openairesponses.Codec and this function would go away.
+//
+// A FORK IS NOT FREE, and this one has already proved it twice: the shared
+// codec's "malformed SSE is an error" fix and its ResponseErrorEvent handling
+// both had to be re-landed here after being written once upstream. EVERY
+// non-Azure branch below must therefore stay behaviourally identical to
+// openairesponses/stream.go's collector — when that file changes, this one is
+// the second half of the change.
 func (c *streamCollector) mapFrame(frame stream.StreamFrame) ([]content.Chunk, error) {
+	// A frame that is not decodable JSON is content loss, not a
+	// forward-compatible skip: surfacing it keeps a truncated stream from
+	// being reported as a complete turn. Unknown but well-formed event types
+	// still fall through to the tolerant default branch.
 	var event streamEvent
 	if err := json.Unmarshal(frame.Data, &event); err != nil {
-		return nil, nil
+		return nil, &responses.StreamEventDecodeError{Err: err}
 	}
 
 	switch event.Type {
+	case eventError:
+		// ResponseErrorEvent, the spec's OTHER failure channel. The shared
+		// codec raises it in its collector and returns (nil, nil) for it from
+		// decodeEnvelope, so the default branch below cannot see it: delegating
+		// would end the stream at natural EOF and report a turn that died
+		// mid-generation as a clean success.
+		return nil, &responses.StreamAPIError{Code: event.Code, Message: event.Message}
 	case eventResponseFailed:
+		// The failure is raised unconditionally, matching the shared
+		// Responses collector: an envelope this codec cannot read only
+		// degrades the diagnostics, never the failure itself. Azure reports
+		// content-filter rejections this way.
 		var response struct {
 			Error *struct {
 				Code    string `json:"code"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := json.Unmarshal(event.Response, &response); err != nil {
-			return nil, nil
-		}
 		streamErr := &responses.StreamAPIError{}
-		if response.Error != nil {
+		if err := json.Unmarshal(event.Response, &response); err == nil && response.Error != nil {
 			streamErr.Code = response.Error.Code
 			streamErr.Message = response.Error.Message
 		}
@@ -406,7 +468,7 @@ func (c *streamCollector) mapFrame(frame stream.StreamFrame) ([]content.Chunk, e
 		return nil, nil
 	case eventReasoningTextDelta, eventReasoningDelta, eventReasoningSummaryDelta:
 		if delta, ok := stringDelta(event.Delta); ok && delta != "" {
-			return []content.Chunk{&content.ThinkingChunk{Thinking: delta}}, nil
+			return []content.Chunk{&content.ThinkingChunk{Index: event.OutputIndex, Thinking: delta}}, nil
 		}
 		return nil, nil
 	default:

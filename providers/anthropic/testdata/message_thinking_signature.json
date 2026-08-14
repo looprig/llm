@@ -1,0 +1,35 @@
+{
+  "id": "msg_10Thinking",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "The user asks for a capital. France's capital is Paris.",
+      "signature": "ErUBCkYIBRgCIkDGZk3nzY1Ck0Z9tGmH5cV9pQd8bB0oS3ib9nSSPCa2Zx8T7hUeQyL2mF3aQ0kX9pRcNvJ8sHtYb1cWqEoDEgxKZ0lQvXHRk3TnJ2gaDNz2Q1n9nUuVYQmZ0SIwHkK"
+    },
+    {
+      "type": "text",
+      "text": "Paris.",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 61,
+    "cache_creation_input_tokens": null,
+    "cache_read_input_tokens": null,
+    "cache_creation": null,
+    "inference_geo": null,
+    "output_tokens_details": {
+      "thinking_tokens": 44
+    },
+    "server_tool_use": null,
+    "service_tier": "standard"
+  },
+  "container": null
+}

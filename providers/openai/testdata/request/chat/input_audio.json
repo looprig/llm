@@ -1,0 +1,21 @@
+{
+  "model": "gpt-4o-audio-preview",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Transcribe this."
+        },
+        {
+          "type": "input_audio",
+          "input_audio": {
+            "data": "UklGRiQAAABXQVZF",
+            "format": "wav"
+          }
+        }
+      ]
+    }
+  ]
+}

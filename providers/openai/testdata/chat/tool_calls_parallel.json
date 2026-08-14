@@ -1,0 +1,49 @@
+{
+  "id": "chatcmpl-parallel",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_a",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Paris\"}"
+            }
+          },
+          {
+            "id": "call_b",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Berlin\"}"
+            }
+          },
+          {
+            "id": "call_c",
+            "type": "function",
+            "function": {
+              "name": "get_time",
+              "arguments": "{\"zone\":\"UTC\"}"
+            }
+          }
+        ]
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 61,
+    "completion_tokens": 44,
+    "total_tokens": 105
+  }
+}

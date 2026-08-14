@@ -1,0 +1,34 @@
+{
+  "id": "msg_08ToolSingle",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01SingleCall",
+      "name": "search",
+      "input": {
+        "query": "conformance gate"
+      },
+      "caller": {
+        "type": "direct"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 7,
+    "cache_creation_input_tokens": null,
+    "cache_read_input_tokens": null,
+    "cache_creation": null,
+    "inference_geo": null,
+    "output_tokens_details": null,
+    "server_tool_use": null,
+    "service_tier": "standard"
+  },
+  "container": null
+}

@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": []
+      },
+      "finishReason": "SAFETY",
+      "index": 0,
+      "safetyRatings": [
+        {
+          "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+          "probability": "HIGH",
+          "blocked": true
+        },
+        {
+          "category": "HARM_CATEGORY_HARASSMENT",
+          "probability": "NEGLIGIBLE"
+        }
+      ],
+      "finishMessage": "The candidate was blocked by the safety filter."
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

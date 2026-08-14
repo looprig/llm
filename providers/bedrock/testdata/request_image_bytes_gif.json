@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "gif",
+            "source": {
+              "bytes": "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+            }
+          }
+        },
+        {
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

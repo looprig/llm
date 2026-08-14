@@ -1,0 +1,27 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Before."
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAACAAEABf4C+gAAAABJRU5ErkJggg=="
+          }
+        },
+        {
+          "type": "text",
+          "text": "After."
+        }
+      ]
+    }
+  ]
+}

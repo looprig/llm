@@ -1,0 +1,22 @@
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "url": "https://example.com/diagram.png"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

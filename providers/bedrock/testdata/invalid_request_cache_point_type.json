@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "x"
+        },
+        {
+          "cachePoint": {
+            "type": "DEFAULT"
+          }
+        }
+      ]
+    }
+  ]
+}

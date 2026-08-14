@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "What is in this image?"
+        },
+        {
+          "inlineData": {
+            "data": "iVBORw0KGgo=",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "msg_13ThinkingTwo",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "First, establish the constraint.",
+      "signature": "ErUBCkYIBRgCIkDGZk3nzY1Ck0Z9tGmH5cV9pQd8bB0oS3ib9nSSPCa2Zx8T7hUeQyL2mF3aQ0kX9pRcNvJ8sHtYb1cWqEoDEgxKZ0lQvXHRk3TnJ2gaDNz2Q1n9nUuVYQmZ0SIwHkK"
+    },
+    {
+      "type": "thinking",
+      "thinking": "Second, apply it to the input.",
+      "signature": "ErUBCkYIBRgCIkBrLQ4mT9vX2cE8pQ0dS7oW1hYnB3kZ8fUvGmR6tJxCwNlPaKdE5sMzHqVbT2yXgIhAoZ0lQvXHRk3TnJ2gaDPq7R4m2sUuVYQmZ0SIwHkQ"
+    },
+    {
+      "type": "text",
+      "text": "Both constraints hold.",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 41,
+    "output_tokens": 133,
+    "cache_creation_input_tokens": null,
+    "cache_read_input_tokens": null,
+    "cache_creation": null,
+    "inference_geo": null,
+    "output_tokens_details": {
+      "thinking_tokens": 110
+    },
+    "server_tool_use": null,
+    "service_tier": "standard"
+  },
+  "container": null
+}

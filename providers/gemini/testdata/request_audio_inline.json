@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "inlineData": {
+            "mimeType": "audio/mp3",
+            "data": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA"
+          }
+        },
+        {
+          "text": "Transcribe this clip."
+        }
+      ]
+    }
+  ]
+}

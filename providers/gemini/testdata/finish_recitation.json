@@ -1,0 +1,22 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "In the beginning"
+          }
+        ]
+      },
+      "finishReason": "RECITATION",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

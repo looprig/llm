@@ -1,0 +1,23 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Oslo is 4 degrees celsius."
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 12,
+    "cachedContentTokenCount": 4,
+    "candidatesTokenCount": 8,
+    "totalTokenCount": 20
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

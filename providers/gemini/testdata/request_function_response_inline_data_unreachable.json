@@ -1,0 +1,74 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Render a bar chart of Q3 revenue."
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "functionCall": {
+            "id": "call_chart_01",
+            "name": "render_chart",
+            "args": {
+              "kind": "bar",
+              "series": "q3_revenue"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_chart_01",
+            "name": "render_chart",
+            "response": {
+              "status": "ok"
+            },
+            "parts": [
+              {
+                "inlineData": {
+                  "mimeType": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "render_chart",
+          "description": "Render a chart",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "kind": {
+                "type": "STRING"
+              },
+              "series": {
+                "type": "STRING"
+              }
+            },
+            "required": [
+              "kind",
+              "series"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

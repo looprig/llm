@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -288,7 +289,89 @@ func (c *Client) encodeConverse(req inference.Request, streaming bool) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	return c.options.applyConverse(body, streaming)
+	var boundary *projectedCacheBoundary
+	if c.options.cachePoint != nil {
+		boundary, err = cacheBoundaryForRequest(req, body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return c.options.applyConverse(body, streaming, boundary)
+}
+
+type projectedCacheBoundary struct {
+	messageIndex int
+	contentIndex int
+}
+
+type projectedMessage struct {
+	Role    string            `json:"role"`
+	Content []json.RawMessage `json:"content"`
+}
+
+func cacheBoundaryForRequest(req inference.Request, fullBody []byte) (*projectedCacheBoundary, error) {
+	committedSource := len(req.Messages) - req.TransientMessages
+	for index := committedSource; index < len(req.Messages); index++ {
+		if _, system := req.Messages[index].(*content.SystemMessage); system {
+			return nil, &OptionError{Reason: "cachePoint cannot precede transient system context"}
+		}
+	}
+	committed := req
+	committed.Messages = committed.Messages[:committedSource]
+	committed.TransientMessages = 0
+	committedBody, err := bedrockconverse.EncodeRequest(committed)
+	if err != nil {
+		return nil, err
+	}
+	fullMessages, err := projectedMessages(fullBody)
+	if err != nil {
+		return nil, err
+	}
+	committedMessages, err := projectedMessages(committedBody)
+	if err != nil {
+		return nil, err
+	}
+	if len(committedMessages) == 0 {
+		return nil, nil
+	}
+	for messageIndex, stable := range committedMessages {
+		if messageIndex >= len(fullMessages) || stable.Role != fullMessages[messageIndex].Role {
+			return nil, &OptionError{Reason: "committed Converse projection is not a prefix of the full request"}
+		}
+		full := fullMessages[messageIndex]
+		matched := 0
+		for matched < len(stable.Content) && matched < len(full.Content) && bytes.Equal(stable.Content[matched], full.Content[matched]) {
+			matched++
+		}
+		if matched < len(stable.Content) {
+			if messageIndex == 0 {
+				if req.System == "" {
+					return nil, &OptionError{Reason: "no safe cachePoint boundary before volatile projected content"}
+				}
+				return nil, nil
+			}
+			return &projectedCacheBoundary{messageIndex: messageIndex - 1, contentIndex: len(fullMessages[messageIndex-1].Content)}, nil
+		}
+		if matched < len(full.Content) {
+			return &projectedCacheBoundary{messageIndex: messageIndex, contentIndex: matched}, nil
+		}
+	}
+	last := len(committedMessages) - 1
+	return &projectedCacheBoundary{messageIndex: last, contentIndex: len(fullMessages[last].Content)}, nil
+}
+
+func projectedMessages(body []byte) ([]projectedMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, &OptionError{Reason: "decode Converse request for cachePoint boundary", Err: err}
+	}
+	var messages []projectedMessage
+	if raw := fields["messages"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &messages); err != nil {
+			return nil, &OptionError{Reason: "decode Converse messages for cachePoint boundary", Err: err}
+		}
+	}
+	return messages, nil
 }
 
 func (c *Client) doSigned(ctx context.Context, request *http.Request) (*http.Response, error) {

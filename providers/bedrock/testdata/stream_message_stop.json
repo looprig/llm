@@ -1,0 +1,5 @@
+{
+  "messageStop": {
+    "stopReason": "tool_use"
+  }
+}

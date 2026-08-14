@@ -20,12 +20,50 @@ import (
 	"github.com/looprig/inference/auth"
 	failure "github.com/looprig/inference/failure"
 
+	"github.com/looprig/inference/codec/conformance"
 	geminicodec "github.com/looprig/inference/codec/geminiapi"
 	contextcount "github.com/looprig/inference/contextcount"
 	model "github.com/looprig/inference/model"
 	usage "github.com/looprig/inference/usage"
 	"github.com/looprig/llm"
 )
+
+// gateCountTokensBody validates the generateContentRequest a countTokens
+// envelope wraps against Google's own request schema. countTokens has no
+// document of its own in the gate, but its payload IS a GenerateContentRequest
+// (plus the model resource name), so the encoder is held to exactly the same
+// standard on the counting route as on the inference one — which matters,
+// because the counter reuses geminiapi.EncodeRequest verbatim.
+func gateCountTokensBody(t *testing.T, body []byte) {
+	t.Helper()
+	var envelope struct {
+		GenerateContentRequest json.RawMessage `json:"generateContentRequest"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Errorf("countTokens body unmarshal error = %v", err)
+		return
+	}
+	if len(envelope.GenerateContentRequest) == 0 {
+		t.Errorf("countTokens body = %s, want a generateContentRequest wrapper", body)
+		return
+	}
+	if err := conformance.Validate("gemini", "generate_content_request", envelope.GenerateContentRequest); err != nil {
+		t.Errorf("the encoded countTokens payload is not a legal Gemini request: %v", err)
+	}
+}
+
+// gateSentCountTokens gates the body an httptest handler received. Like
+// gateSentRequest in the gemini_test suite it reports non-fatally, because it
+// runs on the server's goroutine.
+func gateSentCountTokens(t *testing.T, r *http.Request) {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Errorf("read countTokens request body: %v", err)
+		return
+	}
+	gateCountTokensBody(t, body)
+}
 
 const counterTestKey auth.APIKey = "AIza-counter-test-key"
 
@@ -118,6 +156,7 @@ func TestCounterCountContext(t *testing.T) {
 			if !ok {
 				t.Fatalf("countTokens request = %s, want generateContentRequest wrapper", wire.body)
 			}
+			gateCountTokensBody(t, wire.body)
 			assertCountGenerateRequest(t, nested, wantBody, "models/"+req.Model.Name)
 		})
 	}
@@ -161,8 +200,10 @@ func TestCounterCountRequestModel(t *testing.T) {
 				t.Errorf("wire route = %q, want %q", got, want)
 			}
 
+			body := <-bodyCh
+			gateCountTokensBody(t, body)
 			var envelope map[string]json.RawMessage
-			if err := json.Unmarshal(<-bodyCh, &envelope); err != nil {
+			if err := json.Unmarshal(body, &envelope); err != nil {
 				t.Fatalf("countTokens body unmarshal error = %v", err)
 			}
 			if len(envelope) != 1 {
@@ -327,7 +368,8 @@ func TestCounterResponseValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gateSentCountTokens(t, r)
 				_, _ = io.WriteString(w, tt.response)
 			}))
 			defer srv.Close()
@@ -689,6 +731,7 @@ func TestCounterCanonicalEndpointRoute(t *testing.T) {
 			pathCh := make(chan string, 1)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				pathCh <- req.URL.EscapedPath() + "?" + req.URL.RawQuery
+				gateSentCountTokens(t, req)
 				_, _ = io.WriteString(w, `{"totalTokens":1}`)
 			}))
 			defer srv.Close()
@@ -737,6 +780,7 @@ func TestCounterEndpointEquivalence(t *testing.T) {
 			requestURL := make(chan string, 1)
 			left.hc = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				requestURL <- req.URL.String()
+				gateSentCountTokens(t, req)
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"totalTokens":1}`)), Header: make(http.Header)}, nil
 			})}
 			_, err := left.CountContext(context.Background(), counterRequest("gemini-2.5-flash"))

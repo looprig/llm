@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "inlineData": {
+            "mimeType": "application/pdf",
+            "data": "JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDM+PnN0cmVhbQpCVAplbmRzdHJlYW0KZW5kb2JqCg=="
+          }
+        },
+        {
+          "text": "Summarise this contract."
+        }
+      ]
+    }
+  ]
+}

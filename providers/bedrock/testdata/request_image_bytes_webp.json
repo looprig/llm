@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "webp",
+            "source": {
+              "bytes": "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA=="
+            }
+          }
+        },
+        {
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

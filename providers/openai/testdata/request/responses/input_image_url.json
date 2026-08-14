@@ -1,0 +1,20 @@
+{
+  "model": "gpt-5",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What is in this picture?"
+        },
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "image_url": "https://example.com/cat.png"
+        }
+      ]
+    }
+  ]
+}

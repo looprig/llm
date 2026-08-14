@@ -1,0 +1,46 @@
+{
+  "id": "resp_incomplete_len",
+  "object": "response",
+  "created_at": 1770000000,
+  "status": "incomplete",
+  "error": null,
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  },
+  "instructions": null,
+  "model": "gpt-5",
+  "output": [
+    {
+      "id": "msg_2",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Once upon a time there was a very",
+          "annotations": [],
+          "logprobs": []
+        }
+      ],
+      "status": "incomplete"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "metadata": {},
+  "tool_choice": "auto",
+  "tools": [],
+  "temperature": 1,
+  "top_p": 1,
+  "usage": {
+    "input_tokens": 12,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "output_tokens": 16,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 28
+  }
+}

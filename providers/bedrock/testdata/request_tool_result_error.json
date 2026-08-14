@@ -1,0 +1,56 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "Read the file."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_read_1",
+            "name": "read_file",
+            "input": {
+              "path": "/x"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "toolResult": {
+            "toolUseId": "tooluse_read_1",
+            "status": "error",
+            "content": [
+              {
+                "text": "permission denied"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "name": "read_file",
+          "inputSchema": {
+            "json": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

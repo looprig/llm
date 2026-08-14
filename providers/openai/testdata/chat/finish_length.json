@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-length",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "length",
+      "message": {
+        "role": "assistant",
+        "content": "Once upon a time there was a very long story that",
+        "refusal": null
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 16,
+    "total_tokens": 28
+  }
+}

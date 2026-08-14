@@ -578,7 +578,7 @@ func executeFormat(contract Contract, server *Server, format model.APIFormat) er
 	}
 	maxTokens := 256
 	selected := model.CustomModel(model.ProviderName(contract.Provider), format, server.URL(), name,
-		model.WithTools(), model.WithThinking(), model.WithImages(), model.WithPromptCaching(),
+		model.WithTools(), model.WithThinkingDialect(model.ThinkingDialectAdaptive), model.WithImages(), model.WithPromptCaching(),
 		model.WithStructuredOutputWithTools(), model.WithSampling(model.Sampling{MaxTokens: &maxTokens, Effort: model.EffortHigh}),
 	)
 	descriptor, err := credentials.NewDescriptor(contract.Provider, contract.Transport, contract.Scheme, contract.Usage, contract.Issuer, server.URL(), "")
@@ -886,6 +886,23 @@ func exerciseStreamLifecycle(contract Contract, selected model.Model, descriptor
 	return nil
 }
 
+// contractSignatureFormat labels this fixture's reasoning signature with the
+// dialect under test. A signature is verified by the endpoint that minted it,
+// so a matrix fixture reused across dialects cannot share one label: the
+// Anthropic and Bedrock encoders refuse a signature that is not theirs, which
+// is exactly the protection the label exists to give. Dialects with no
+// signature wire field get none and never read the field.
+func contractSignatureFormat(format model.APIFormat) string {
+	switch format {
+	case model.APIFormatAnthropic:
+		return "anthropic"
+	case model.APIFormatBedrockConverse:
+		return "bedrock-converse"
+	default:
+		return ""
+	}
+}
+
 func featureRequestForContract(selected model.Model) inference.Request {
 	return inference.Request{
 		Model:  selected,
@@ -896,7 +913,8 @@ func featureRequestForContract(selected model.Model) inference.Request {
 				&content.ImageBlock{MediaType: content.MediaTypeImagePNG, Source: content.ImageSource{Data: []byte("fixture-image")}},
 			}}},
 			&content.AIMessage{Message: content.Message{Role: content.RoleAssistant, Blocks: []content.Block{
-				&content.ThinkingBlock{Thinking: "prior reasoning", Signature: "fixture-signature"},
+				content.NewSignedThinkingBlock("prior reasoning", "fixture-signature",
+					contractSignatureFormat(selected.APIFormat), nil, ""),
 				&content.TextBlock{Text: "calling lookup"},
 				&content.ToolUseBlock{ID: "call_1", Name: "lookup", Input: json.RawMessage(`{"value":"input"}`)},
 			}}},
@@ -904,7 +922,7 @@ func featureRequestForContract(selected model.Model) inference.Request {
 		},
 		Tools:      []inference.Tool{{Name: "lookup", Description: "look up a value", Schema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`)}},
 		Output:     &inference.OutputSchema{Name: "answer", Strict: true, Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 	}
 }
 

@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "fileData": {
+            "fileUri": "https://generativelanguage.googleapis.com/v1beta/files/abc123",
+            "mimeType": "image/png"
+          }
+        },
+        {
+          "text": "Caption it."
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

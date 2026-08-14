@@ -1,0 +1,23 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "thoughtSignature": "CtEBAVSoXO9dLJm1ZDBQ0Vd1s9Yb3Uu8w==",
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Oslo"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-pro"
+}

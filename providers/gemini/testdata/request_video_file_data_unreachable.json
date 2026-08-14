@@ -1,0 +1,23 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "fileData": {
+            "mimeType": "video/mp4",
+            "fileUri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+          },
+          "videoMetadata": {
+            "startOffset": "10s",
+            "endOffset": "45.500s",
+            "fps": 1.0
+          }
+        },
+        {
+          "text": "What happens between 10 and 45 seconds?"
+        }
+      ]
+    }
+  ]
+}

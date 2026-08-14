@@ -1,0 +1,14 @@
+{
+  "metadata": {
+    "usage": {
+      "inputTokens": 27,
+      "outputTokens": 84,
+      "totalTokens": 111,
+      "cacheReadInputTokens": 4096,
+      "cacheWriteInputTokens": 0
+    },
+    "metrics": {
+      "latencyMs": 1240
+    }
+  }
+}

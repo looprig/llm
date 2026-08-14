@@ -1,0 +1,38 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "thought": true,
+            "text": "First, identify the city.",
+            "thoughtSignature": "CoEBAVSoXO9zaWduYXR1cmUtb25l"
+          },
+          {
+            "thought": true,
+            "text": "Then, look up its forecast.",
+            "thoughtSignature": "CoEBAVSoXO9zaWduYXR1cmUtdHdv"
+          },
+          {
+            "thought": true,
+            "text": "Finally, answer.",
+            "thoughtSignature": "CoMBAVSoXO9zaWduYXR1cmUtdGhyZWU="
+          },
+          {
+            "text": "4 degrees celsius."
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 8,
+    "candidatesTokenCount": 5,
+    "thoughtsTokenCount": 63,
+    "totalTokenCount": 76
+  },
+  "modelVersion": "gemini-2.5-pro"
+}

@@ -1,0 +1,39 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "Checking both cities."
+        },
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_paris_1",
+            "name": "get_weather",
+            "input": {
+              "city": "Paris"
+            }
+          }
+        },
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_tokyo_2",
+            "name": "get_weather",
+            "input": {
+              "city": "Tokyo"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "stopReason": "tool_use",
+  "usage": {
+    "inputTokens": 88,
+    "outputTokens": 96,
+    "totalTokens": 184
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

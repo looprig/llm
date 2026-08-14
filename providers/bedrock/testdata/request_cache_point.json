@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "Long committed prefix."
+        },
+        {
+          "cachePoint": {
+            "type": "default"
+          }
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "text": "You are precise."
+    },
+    {
+      "cachePoint": {
+        "type": "default",
+        "ttl": "1h"
+      }
+    }
+  ]
+}

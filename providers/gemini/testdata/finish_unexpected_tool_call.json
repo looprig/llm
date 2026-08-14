@@ -1,0 +1,19 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": []
+      },
+      "finishReason": "UNEXPECTED_TOOL_CALL",
+      "index": 0,
+      "finishMessage": "The model emitted a tool call for a tool that was not declared."
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "gemini-2.5-flash"
+}

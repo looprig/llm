@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "image": {
+            "format": "png",
+            "source": {
+              "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAACAAEABf4C+gAAAABJRU5ErkJggg=="
+            }
+          }
+        },
+        {
+          "text": "Describe this image."
+        }
+      ]
+    }
+  ]
+}

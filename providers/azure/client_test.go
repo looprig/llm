@@ -213,7 +213,6 @@ func TestStreamDecodesAzureResponsesEventsAndUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"in_progress\"}}\n\n")
-		_, _ = io.WriteString(w, "data: {malformed-event}\n\n")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"think\"}\n\n")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}],\"usage\":{\"input_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":1},\"output_tokens\":4,\"output_tokens_details\":{\"reasoning_tokens\":1}}}}\n\n")
@@ -254,6 +253,92 @@ func TestStreamDecodesAzureResponsesEventsAndUsage(t *testing.T) {
 	result, ok := reader.Result()
 	if !ok || result.Model != "gpt-4.1" || result.Usage == nil || result.Usage.InputTokens != 6 || result.Usage.CacheReadTokens != 1 {
 		t.Errorf("stream result = %+v, ok=%v, want model/usage", result, ok)
+	}
+}
+
+// TestStreamRejectsMalformedEvent pins that an undecodable frame inside an
+// otherwise well-framed stream surfaces as a typed error. Skipping it would
+// drop content and still report the turn as a clean, completed success.
+func TestStreamRejectsMalformedEvent(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"trunc\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"completed\"}}\n\n")
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1")
+	client, err := azure.New(selected, "azure-test-key")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var streamErr error
+	for {
+		_, nextErr := reader.Next()
+		if nextErr != nil {
+			streamErr = nextErr
+			break
+		}
+	}
+	var decodeErr *responses.StreamEventDecodeError
+	if !errors.As(streamErr, &decodeErr) {
+		t.Fatalf("Stream.Next() error = %T %v, want *responses.StreamEventDecodeError", streamErr, streamErr)
+	}
+	if result, ok := reader.Result(); ok {
+		t.Errorf("stream result = %+v, ok = true, want no terminal result after a malformed event", result)
+	}
+}
+
+// TestStreamRejectsUnknownEventTypes keeps the forward-compatibility half of
+// the contract: a well-formed event this codec does not model is skipped, not
+// an error.
+func TestStreamRejectsUnknownEventTypes(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.some_future_event\",\"payload\":{\"anything\":true}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-4.1\",\"status\":\"completed\"}}\n\n")
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1")
+	client, err := azure.New(selected, "azure-test-key")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var chunks []content.Chunk
+	for {
+		chunk, nextErr := reader.Next()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			t.Fatalf("Stream.Next() error = %v", nextErr)
+		}
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("chunks = %#v, want the single text chunk", chunks)
+	}
+	if result, ok := reader.Result(); !ok || result.Model != "gpt-4.1" {
+		t.Errorf("stream result = %+v, ok = %v, want completed result", result, ok)
 	}
 }
 
@@ -390,6 +475,40 @@ func TestMalformedAndHTTPErrorResponses(t *testing.T) {
 			t.Fatalf("Stream.Next() error = %T %v, want content_filter stream error", err, err)
 		}
 	})
+
+	// A response.failed event is a server-side failure whatever its envelope
+	// looks like: an envelope this codec cannot read degrades the diagnostics,
+	// never the failure itself.
+	for _, tc := range []struct{ name, event string }{
+		{name: "stream failure with unreadable envelope", event: "data: {\"type\":\"response.failed\",\"response\":\"blocked by content management policy\"}\n\n"},
+		{name: "stream failure without envelope", event: "data: {\"type\":\"response.failed\"}\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tc.event)
+			}))
+			defer srv.Close()
+			selected := model.CustomModel(model.ProviderName(llm.ProviderAzure), model.APIFormatOpenAIResponses, srv.URL+"/openai/v1", "gpt-4.1")
+			client, err := azure.New(selected, "azure-test-key")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+			if err != nil {
+				t.Fatalf("Stream() error = %v", err)
+			}
+			defer func() { _ = reader.Close() }()
+			_, err = reader.Next()
+			var streamErr *responses.StreamAPIError
+			if !errors.As(err, &streamErr) {
+				t.Fatalf("Stream.Next() error = %T %v, want *responses.StreamAPIError", err, err)
+			}
+			if streamErr.Code != "" || streamErr.Message != "" {
+				t.Errorf("stream error = %+v, want empty code/message for an unreadable envelope", streamErr)
+			}
+		})
+	}
 }
 
 func decodeField(t *testing.T, body map[string]json.RawMessage, key string, out any) {

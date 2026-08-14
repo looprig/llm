@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-acs-4","object":"chat.completion.chunk","created":1735689600,"model":"gpt-4o-2024-11-20","choices":[{"index":0,"delta":{"role":"assistant","content":"Sure, here is"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-acs-4","object":"chat.completion.chunk","created":1735689600,"model":"gpt-4o-2024-11-20","choices":[{"index":0,"delta":{},"finish_reason":"content_filter","content_filter_results":{"violence":{"filtered":true,"severity":"medium"}}}]}
+
+data: [DONE]
+

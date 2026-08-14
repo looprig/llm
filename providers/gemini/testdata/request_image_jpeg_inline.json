@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "inlineData": {
+            "data": "/9j/4AAQ",
+            "mimeType": "image/jpeg"
+          }
+        },
+        {
+          "text": "Describe it."
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

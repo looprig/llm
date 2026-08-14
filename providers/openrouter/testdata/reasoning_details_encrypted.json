@@ -1,0 +1,27 @@
+{
+  "id": "or-3",
+  "object": "chat.completion",
+  "created": 1735689600,
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Paris.",
+        "refusal": null,
+        "reasoning_details": [
+          {
+            "type": "reasoning.encrypted",
+            "data": "RVJQVEVEUkVBU09OSU5H",
+            "signature": "c2lnbmF0dXJl",
+            "format": "anthropic-claude-v1",
+            "index": 0
+          }
+        ]
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ]
+}

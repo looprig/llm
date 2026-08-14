@@ -13,6 +13,7 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/inference"
 	"github.com/looprig/inference/auth"
+	"github.com/looprig/inference/codec/conformance"
 	contextcount "github.com/looprig/inference/contextcount"
 	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
@@ -71,8 +72,13 @@ func TestCounterCountContext(t *testing.T) {
 			t.Errorf("CountContext() = %+v, want %+v", got, want)
 		}
 
+		// The count preflight is a create_response_request with the generation
+		// controls stripped, so it is held against that same request schema:
+		// dropping fields must not produce a body OpenAI would reject.
+		raw := <-bodyCh
+		conformance.MustValidateRequest(t, "openai-responses", "create_response_request", raw)
 		var body map[string]json.RawMessage
-		if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatalf("request body JSON error = %v", err)
 		}
 		var modelName string

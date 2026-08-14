@@ -203,7 +203,7 @@ func openAIToolStructured(t *testing.T, provider llm.Provider, key auth.APIKey, 
 		},
 		Tools:      []inference.Tool{{Name: "lookup", Description: "look up a value", Schema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`)}},
 		Output:     &inference.OutputSchema{Name: "answer", Strict: true, Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 	})
 	if err != nil {
 		t.Fatalf("Invoke() error = %v", err)
@@ -571,7 +571,10 @@ func responsesFeatureContract(t *testing.T, provider llm.Provider, key auth.APIK
 		}
 		if string(request["stream"]) == "true" {
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprint(w, "data: {malformed-event}\n\n")
+			// No malformed frame here: this contract covers feature round-tripping
+			// (tools, reasoning, text), and malformed SSE is now an authoritative
+			// decode error rather than a skipped line. Malformed-frame handling is
+			// asserted by the codec's own stream tests, not by a feature contract.
 			_, _ = fmt.Fprint(w, "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"think\"}\n\n")
 			_, _ = fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n")
 			_, _ = fmt.Fprint(w, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"lookup\"}}\n\n")
@@ -602,7 +605,7 @@ func responsesFeatureContract(t *testing.T, provider llm.Provider, key auth.APIK
 		},
 		Tools:      []inference.Tool{{Name: "lookup", Description: "look up a value", Schema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`)}},
 		Output:     &inference.OutputSchema{Name: "answer", Strict: true, Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 	}
 	client, err := construct(selected, key)
 	if err != nil {
@@ -797,8 +800,20 @@ func responsesErrorResponses(t *testing.T, provider llm.Provider, key auth.APIKe
 		if _, err := reader.Next(); err != nil {
 			t.Fatalf("first Stream.Next() error = %v", err)
 		}
-		if _, err := reader.Next(); !errors.Is(err, io.EOF) {
-			t.Fatalf("truncated Stream.Next() error = %v, want EOF", err)
+		// A body that stops before response.completed is a truncated answer,
+		// so the Responses codec's terminal gate ends the read with a typed
+		// failure. This assertion previously required io.EOF — the clean
+		// exhaustion sentinel — which is precisely how a lost turn came to be
+		// reported as a completed one: the caller sees a finished stream whose
+		// content silently stops mid-sentence. Only the missing result trailer
+		// was checked, and no caller is obliged to check it.
+		_, err = reader.Next()
+		if errors.Is(err, io.EOF) {
+			t.Fatal("truncated Stream.Next() = EOF; a stream that never reached a terminal response event must fail, not exhaust cleanly")
+		}
+		var resultErr *stream.StreamResultError
+		if !errors.As(err, &resultErr) {
+			t.Fatalf("truncated Stream.Next() error = %T %v, want *stream.StreamResultError", err, err)
 		}
 		if _, ok := reader.Result(); ok {
 			t.Fatal("truncated stream returned terminal result without response.completed")

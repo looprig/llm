@@ -1,0 +1,24 @@
+{
+  "model": "gpt-4.1",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Before."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "https://example.com/mid.png"
+          }
+        },
+        {
+          "type": "text",
+          "text": "After."
+        }
+      ]
+    }
+  ]
+}

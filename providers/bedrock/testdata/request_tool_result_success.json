@@ -1,0 +1,56 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "text": "What is the weather in Paris?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tooluse_weather_1",
+            "name": "get_weather",
+            "input": {
+              "city": "Paris"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "toolResult": {
+            "toolUseId": "tooluse_weather_1",
+            "status": "success",
+            "content": [
+              {
+                "text": "18C and clear"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "name": "get_weather",
+          "inputSchema": {
+            "json": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

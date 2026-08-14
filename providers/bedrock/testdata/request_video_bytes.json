@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "video": {
+            "format": "mp4",
+            "source": {
+              "bytes": "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK"
+            }
+          }
+        },
+        {
+          "text": "Describe this clip."
+        }
+      ]
+    }
+  ]
+}

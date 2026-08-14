@@ -1,0 +1,9 @@
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","sequence_number":0,"item_id":"rs_az_8","output_index":0,"content_index":0,"delta":"weighing options"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":1,"item_id":"msg_az_8","output_index":1,"content_index":0,"delta":"done","logprobs":[]}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":2,"response":{"id":"resp_az_8","object":"response","created_at":1735689600,"status":"completed","error":null,"incomplete_details":null,"instructions":null,"model":"gpt-4.1","output":[{"id":"msg_az_8","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done","annotations":[],"logprobs":[]}]}],"parallel_tool_calls":true,"metadata":{},"tool_choice":"auto","tools":[],"temperature":1,"top_p":1,"usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":4}}}
+

@@ -1,0 +1,25 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "thought": true,
+            "text": "The user wants a forecast."
+          },
+          {
+            "thought": true,
+            "text": ""
+          },
+          {
+            "text": "4 degrees celsius."
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-flash"
+}

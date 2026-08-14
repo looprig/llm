@@ -128,8 +128,11 @@ func TestBedrockConverseInvoke(t *testing.T) {
 	if authz := got.Header.Get("Authorization"); !strings.HasPrefix(authz, "AWS4-HMAC-SHA256 ") || !strings.Contains(authz, "/us-east-1/bedrock/aws4_request") {
 		t.Errorf("Authorization = %q, want Bedrock SigV4 scope", authz)
 	}
+	raw := <-bodyCh
+	gateConverseRequest(t, raw)
+
 	var body map[string]json.RawMessage
-	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("request body JSON = %v", err)
 	}
 	if _, ok := body["model"]; ok {
@@ -144,8 +147,10 @@ func TestBedrockConverseStream(t *testing.T) {
 	t.Parallel()
 
 	requestCh := make(chan *http.Request, 1)
+	bodyCh := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCh <- r.Clone(context.Background())
+		bodyCh <- readAll(t, r)
 		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		_, _ = w.Write(eventStreamBody())
 	}))
@@ -171,6 +176,10 @@ func TestBedrockConverseStream(t *testing.T) {
 	if !ok || result.FinishReason != "stop" || result.Usage == nil || result.Usage.InputTokens != 4 || result.Model != converseModelID {
 		t.Fatalf("stream result = %#v, ok=%v, want model/stop/usage", result, ok)
 	}
+
+	// ConverseStream is a distinct encode path (the streaming guardrail mode is
+	// only legal there), so its body is gated separately from Converse's.
+	gateConverseRequest(t, <-bodyCh)
 
 	got := <-requestCh
 	if got.URL.EscapedPath() != "/model/"+converseModelID+"/converse-stream" {
@@ -217,8 +226,16 @@ func TestBedrockConverseOptions(t *testing.T) {
 	if _, err := c.Invoke(context.Background(), request); err != nil {
 		t.Fatalf("Invoke() error = %v", err)
 	}
+	raw := <-bodyCh
+	// Every option this test switches on writes into the Converse body, so the
+	// gate is the only thing that checks the shapes those options produce:
+	// guardrailConfig's identifier/version patterns, serviceTier's enum,
+	// performanceConfig's enum, requestMetadata's per-value pattern, and the
+	// cachePoint block the prompt-cache option appends.
+	gateConverseRequest(t, raw)
+
 	var body map[string]json.RawMessage
-	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("body JSON = %v", err)
 	}
 	for _, field := range []string{"additionalModelRequestFields", "additionalModelResponseFieldPaths", "guardrailConfig", "performanceConfig", "serviceTier", "requestMetadata", "outputConfig", "system"} {

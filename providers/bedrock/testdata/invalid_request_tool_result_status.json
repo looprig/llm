@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "toolResult": {
+            "toolUseId": "tooluse_read_1",
+            "status": "failure",
+            "content": [
+              {
+                "text": "boom"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

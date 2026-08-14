@@ -1,0 +1,28 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionResponse": {
+              "id": "call_oslo_01",
+              "name": "get_weather",
+              "response": {
+                "result": "4 degrees celsius"
+              },
+              "willContinue": false,
+              "scheduling": "WHEN_IDLE"
+            }
+          },
+          {
+            "text": "Oslo is 4 degrees celsius."
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-flash"
+}

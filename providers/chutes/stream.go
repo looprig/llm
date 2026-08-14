@@ -89,7 +89,9 @@ func (c *Client) invokeStream(ctx context.Context, chuteID string, sess *atteste
 //   - e2e_init missing / arriving after an e2e frame (typed error -> pipe),
 //   - a frame that fails to AEAD-open (fail closed, no skip -> pipe),
 //   - an e2e_error event (typed error -> pipe),
-//   - clean EOF or the [DONE] terminal (writes `data: [DONE]` -> pipe, nil),
+//   - the [DONE] terminal (relays `data: [DONE]` -> pipe, nil),
+//   - the body ending without one (closes the pipe with nil and writes nothing,
+//     leaving openaiapi's terminal gate to complete or reject the stream),
 //   - the caller cancelling streamCtx (via Close) — the body close unblocks the
 //     read and pump returns,
 //   - the caller Closing the returned stream, which closes the pipe reader: the
@@ -148,11 +150,25 @@ func (c *Client) pump(ctx context.Context, body io.ReadCloser, respDK *mlkem.Dec
 
 		data, err := reader.next()
 		if errors.Is(err, errSSEDone) {
-			c.finishClean(pw)
+			c.relayTerminal(pw)
 			return
 		}
-		if err == io.EOF {
-			c.finishClean(pw)
+		// errors.Is, not ==: sseEventReader.next returns the body's terminal as
+		// it received it, and a bare io.EOF is only what bytes coming straight
+		// off an http.Response happen to produce. Any reader that adds framing
+		// context makes an equality test false, and the branch below then
+		// reports a body that ended normally as a transport fault.
+		//
+		// Measured, not assumed: today that misclassification is not observable
+		// from outside this package, because openaiapi either terminates on a
+		// finish_reason without reading the pipe's terminal or raises its own
+		// missing-terminal error, which supersedes whatever the pipe carried.
+		// The visible damage from the old comparison was in
+		// sseEventReader.next, which dropped the final unterminated event. This
+		// is corrected as latent correctness: nothing guarantees the gate keeps
+		// superseding the pipe error.
+		if errors.Is(err, io.EOF) {
+			c.finishUnterminated(pw)
 			return
 		}
 		if err != nil {
@@ -225,10 +241,34 @@ func (c *Client) pump(ctx context.Context, body io.ReadCloser, respDK *mlkem.Dec
 	}
 }
 
-// finishClean writes the [DONE] terminal so openaiapi.NewStream sees a clean
-// end, then closes the pipe with nil (io.EOF to the reader).
-func (c *Client) finishClean(pw *io.PipeWriter) {
+// relayTerminal re-emits a [DONE] the gateway actually sent. sseEventReader
+// consumes that payload as errSSEDone rather than surfacing it as data, so the
+// sentinel has to be written back into the pipe for openaiapi's terminal gate
+// to see it. This is relaying, not synthesis: the bytes were on the wire.
+//
+// The sentinel arrives outside the AEAD-sealed channel, so it is only as
+// trustworthy as the gateway framing every other event — the same trust every
+// OpenAI-compatible provider places in a [DONE] arriving over TLS. A stream
+// that also carried a sealed finish_reason is attested end-to-end; this path
+// covers the ones that did not.
+func (c *Client) relayTerminal(pw *io.PipeWriter) {
 	_, _ = pw.Write([]byte("data: [DONE]\n\n"))
+	_ = pw.CloseWithError(nil)
+}
+
+// finishUnterminated ends the pipe when the upstream body stopped without a
+// [DONE] at the SSE layer. It writes NOTHING: the body running out is not
+// evidence of anything, and the transport tunnels the upstream OpenAI SSE bytes
+// verbatim inside sealed e2e frames, so a generation that really finished
+// already delivered its own terminal — the last chunk's finish_reason — through
+// the tunnel. Closing cleanly hands that judgement to openaiapi's terminal
+// gate, which completes the stream when a finish_reason arrived and raises
+// *openaiapi.StreamDecodeError when nothing did.
+//
+// Writing a [DONE] here instead (as this once did) would forge the gate's proof
+// of completion and report a connection dropped mid-generation as a finished
+// turn.
+func (c *Client) finishUnterminated(pw *io.PipeWriter) {
 	_ = pw.CloseWithError(nil)
 }
 

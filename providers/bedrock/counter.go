@@ -179,7 +179,14 @@ func (c *Counter) preflight(req inference.Request) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		converseBody, err = c.options.applyConverseCountTokens(converseBody)
+		var boundary *projectedCacheBoundary
+		if c.options.cachePoint != nil {
+			boundary, err = cacheBoundaryForRequest(req, converseBody)
+			if err != nil {
+				return nil, err
+			}
+		}
+		converseBody, err = c.options.applyConverseCountTokens(converseBody, boundary)
 		if err != nil {
 			return nil, err
 		}

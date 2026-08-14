@@ -1,0 +1,21 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "Sorry, I cannot help with that."
+        }
+      ]
+    }
+  },
+  "stopReason": "guardrail_intervened",
+  "usage": {
+    "inputTokens": 57,
+    "outputTokens": 9,
+    "totalTokens": 66
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

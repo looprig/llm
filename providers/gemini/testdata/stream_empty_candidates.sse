@@ -1,0 +1,6 @@
+data: {"candidates":[],"modelVersion":"gemini-2.5-flash","responseId":"l5CVaLPqE4mVz7IPtorGmAo"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"index":0}],"modelVersion":"gemini-2.5-flash"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5},"modelVersion":"gemini-2.5-flash"}
+

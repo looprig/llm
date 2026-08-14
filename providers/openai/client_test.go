@@ -107,7 +107,7 @@ func TestNewInvokeUsesResponsesAndNormalizesProviderFields(t *testing.T) {
 			Description: "Look up a city",
 			Schema:      json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}`),
 		}},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 		Output: &inference.OutputSchema{
 			Name:   "answer",
 			Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
@@ -140,7 +140,7 @@ func TestNewInvokeUsesResponsesAndNormalizesProviderFields(t *testing.T) {
 	}
 
 	var body map[string]json.RawMessage
-	if err := json.Unmarshal(<-bodyCh, &body); err != nil {
+	if err := json.Unmarshal(gateResponsesRequest(t, <-bodyCh), &body); err != nil {
 		t.Fatalf("request body JSON error = %v", err)
 	}
 	var instructions string
@@ -194,22 +194,14 @@ func TestChatCompletionsContract(t *testing.T) {
 
 func TestChatCompletionsReasoningOptionUsesChatField(t *testing.T) {
 	t.Parallel()
+	bodyCh := make(chan []byte, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("request JSON = %v", err)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusInternalServerError)
 			return
 		}
-		if _, ok := body["messages"]; !ok {
-			t.Error("Chat request missing messages")
-		}
-		var effort string
-		if err := json.Unmarshal(body["reasoning_effort"], &effort); err != nil || effort != "high" {
-			t.Errorf("reasoning_effort = %q, err=%v, want high", effort, err)
-		}
-		if _, ok := body["reasoning"]; ok {
-			t.Error("Chat request contains Responses reasoning object")
-		}
+		bodyCh <- raw
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"chat","model":"gpt-4.1","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 	}))
@@ -220,15 +212,49 @@ func TestChatCompletionsReasoningOptionUsesChatField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+	// A real user message, not the empty conversation this test used to send:
+	// CreateChatCompletionRequest.messages carries minItems 1, so a body with
+	// no messages is one OpenAI rejects and proves nothing about field
+	// placement.
+	if _, err := client.Invoke(context.Background(), inference.Request{
+		Model: selected,
+		Messages: content.AgenticMessages{
+			&content.UserMessage{Message: content.Message{
+				Role:   content.RoleUser,
+				Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
+			}},
+		},
+	}); err != nil {
 		t.Fatalf("Invoke() error = %v", err)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(gateChatRequest(t, <-bodyCh), &body); err != nil {
+		t.Fatalf("request JSON = %v", err)
+	}
+	if _, ok := body["messages"]; !ok {
+		t.Error("Chat request missing messages")
+	}
+	var effort string
+	if err := json.Unmarshal(body["reasoning_effort"], &effort); err != nil || effort != "high" {
+		t.Errorf("reasoning_effort = %q, err=%v, want high", effort, err)
+	}
+	if _, ok := body["reasoning"]; ok {
+		t.Error("Chat request contains Responses reasoning object")
 	}
 }
 
 func TestStreamDecodesResponsesEventsAndTerminalUsage(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	bodyCh := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusInternalServerError)
+			return
+		}
+		bodyCh <- raw
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-5\",\"status\":\"in_progress\"}}\n\n")
 		_, _ = io.WriteString(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"think\"}\n\n")
@@ -244,11 +270,21 @@ func TestStreamDecodesResponsesEventsAndTerminalUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	reader, err := client.Stream(context.Background(), inference.Request{Model: selected})
+	reader, err := client.Stream(context.Background(), inference.Request{
+		Model: selected,
+		Messages: content.AgenticMessages{
+			&content.UserMessage{Message: content.Message{
+				Role:   content.RoleUser,
+				Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
+			}},
+		},
+	})
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
 	defer func() { _ = reader.Close() }()
+	// A streamed request is an encoded request: gate it like any other.
+	gateResponsesRequest(t, <-bodyCh)
 
 	var chunks []content.Chunk
 	for {
@@ -330,8 +366,14 @@ func TestWithRoundTripperRoutesInvokeThroughCallerTransport(t *testing.T) {
 		"gpt-4.1",
 	)
 	var calls int
+	bodyCh := make(chan []byte, 1)
 	rt := openAIRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
+		raw, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodyCh <- raw
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Status:     "200 OK",
@@ -345,7 +387,15 @@ func TestWithRoundTripperRoutesInvokeThroughCallerTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	resp, err := client.Invoke(context.Background(), inference.Request{Model: selected})
+	resp, err := client.Invoke(context.Background(), inference.Request{
+		Model: selected,
+		Messages: content.AgenticMessages{
+			&content.UserMessage{Message: content.Message{
+				Role:   content.RoleUser,
+				Blocks: []content.Block{&content.TextBlock{Text: "hello"}},
+			}},
+		},
+	})
 	if err != nil {
 		t.Fatalf("Invoke() error = %v", err)
 	}
@@ -355,6 +405,8 @@ func TestWithRoundTripperRoutesInvokeThroughCallerTransport(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("caller-owned RoundTripper calls = %d, want 1", calls)
 	}
+	// A caller-owned transport must still be handed a legal request body.
+	gateChatRequest(t, <-bodyCh)
 }
 
 func TestMalformedAndHTTPErrorResponses(t *testing.T) {

@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-srt","object":"chat.completion.chunk","created":1770000000,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"role":"assistant","content":null},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-srt","object":"chat.completion.chunk","created":1770000000,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"reasoning_content":"I should call the weather tool.","tool_calls":[{"index":0,"id":"call_after_reasoning","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-srt","object":"chat.completion.chunk","created":1770000000,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

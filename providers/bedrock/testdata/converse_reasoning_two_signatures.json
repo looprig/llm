@@ -1,0 +1,37 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "reasoningContent": {
+            "reasoningText": {
+              "text": "First, establish the constraint.",
+              "signature": "ErUBCkYIBRgCIkDGZk3nzY1Ck0Z9tGmH5cV9pQd8bB0oS3ib9nSSPCa2Zx8T7hUeQyL2mF3aQ0kX9pRcNvJ8sHtYb1cWqEoDEgxKZ0lQvXHRk3TnJ2gaDNz2Q1n9nUuVYQmZ0SIwHkK"
+            }
+          }
+        },
+        {
+          "reasoningContent": {
+            "reasoningText": {
+              "text": "Second, apply it.",
+              "signature": "ErUBCkYIBRgCIkBrLQ4mT9vX2cE8pQ0dS7oW1hYnB3kZ8fUvGmR6tJxCwNlPaKdE5sMzHqVbT2yXgIhAoZ0lQvXHRk3TnJ2gaDPq7R4m2sUuVYQmZ0SIwHkQ"
+            }
+          }
+        },
+        {
+          "text": "Both hold."
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 41,
+    "outputTokens": 133,
+    "totalTokens": 174
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

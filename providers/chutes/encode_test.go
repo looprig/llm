@@ -34,7 +34,7 @@ func TestEncodeRequestPreservesStructuredOutputWithTools(t *testing.T) {
 			Name:   "lookup",
 			Schema: wantToolSchema,
 		}},
-		ToolChoice: inference.ToolChoiceRequired,
+		ToolChoice: inference.ToolRequired(),
 	}
 
 	body, err := encodeRequest(req, false, []byte("response-public-key"))

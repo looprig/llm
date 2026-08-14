@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-st","object":"chat.completion.chunk","created":1770000000,"model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":null},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-st","object":"chat.completion.chunk","created":1770000000,"model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_stream_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-st","object":"chat.completion.chunk","created":1770000000,"model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-st","object":"chat.completion.chunk","created":1770000000,"model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-st","object":"chat.completion.chunk","created":1770000000,"model":"gpt-4.1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

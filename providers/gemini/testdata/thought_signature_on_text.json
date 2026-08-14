@@ -1,0 +1,18 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Oslo is 4 degrees celsius.",
+            "thoughtSignature": "CqYBAVSoXO90aWdodC1zaWduYXR1cmUtb24tdGV4dA=="
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-2.5-pro"
+}

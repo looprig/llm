@@ -1,0 +1,26 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "reasoningContent": {
+            "redactedContent": "cmVkYWN0ZWQtcmVhc29uaW5nLWNpcGhlcnRleHQ="
+          }
+        },
+        {
+          "text": "I cannot share that reasoning."
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 19,
+    "outputTokens": 12,
+    "totalTokens": 31
+  },
+  "metrics": {
+    "latencyMs": 812
+  }
+}

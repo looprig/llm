@@ -40,6 +40,7 @@ import (
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 
 	"github.com/looprig/core/content"
+	"github.com/looprig/core/content/streamaccumulator"
 	"github.com/looprig/inference"
 	failure "github.com/looprig/inference/failure"
 	model "github.com/looprig/inference/model"
@@ -594,7 +595,7 @@ func TestInvokePreservesStructuredOutputThroughSealing(t *testing.T) {
 		Description: "look up a value",
 		Schema:      wantToolSchema,
 	}}
-	req.ToolChoice = inference.ToolChoiceRequired
+	req.ToolChoice = inference.ToolRequired()
 
 	resp, err := client.Invoke(context.Background(), req)
 	if err != nil {
@@ -1129,22 +1130,40 @@ func TestStreamReasoningDelta(t *testing.T) {
 		t.Fatalf("Stream() error = %v, want nil", err)
 	}
 	chunks := drainStream(t, reader)
-	if len(chunks) != 1 {
-		t.Fatalf("drained %d chunks, want 1", len(chunks))
+	if len(chunks) != 2 {
+		t.Fatalf("drained %d chunks, want 2", len(chunks))
 	}
-	tc, ok := chunks[0].(*content.ThinkingChunk)
-	if !ok {
-		t.Fatalf("chunk[0] is %T, want *content.ThinkingChunk", chunks[0])
+	var acc streamaccumulator.Thinking
+	for i, chunk := range chunks {
+		tc, ok := chunk.(*content.ThinkingChunk)
+		if !ok {
+			t.Fatalf("chunk[%d] is %T, want *content.ThinkingChunk", i, chunk)
+		}
+		acc.Add(tc)
 	}
-	if tc.Thinking != testReasoning {
-		t.Fatalf("chunk[0].Thinking = %q, want %q", tc.Thinking, testReasoning)
+	// INDEX SEMANTICS. The gateway speaks OpenAI Chat over E2EE: a choice's
+	// delta carries ONE `reasoning_content` string with no block index and no
+	// per-block signature, so the format cannot express a second reasoning
+	// block. Every delta therefore belongs to block 0, and the deltas
+	// concatenate — giving a second one its own index would split one reasoning
+	// stream into two blocks that were never separate.
+	blocks := acc.Blocks()
+	if len(blocks) != 1 {
+		t.Fatalf("accumulated blocks = %d %#v, want exactly 1", len(blocks), blocks)
+	}
+	if blocks[0].Thinking != testReasoning+testReasoningTail {
+		t.Fatalf("block thinking = %q, want %q", blocks[0].Thinking, testReasoning+testReasoningTail)
 	}
 }
 
-const testReasoning = "because"
+const (
+	testReasoning     = "because"
+	testReasoningTail = " of that"
+)
 
-// reasoningStreamDoer overrides the streaming gateway to emit ONE chunk carrying
-// a sealed delta.reasoning_content instead of delta.content.
+// reasoningStreamDoer overrides the streaming gateway to emit TWO chunks, each
+// carrying a sealed delta.reasoning_content instead of delta.content, so the
+// test can hold the accumulated BLOCK shape and not only the chunk shape.
 type reasoningStreamDoer struct{ fakeDoer }
 
 func (d *reasoningStreamDoer) Do(req *http.Request) (*http.Response, error) {
@@ -1165,18 +1184,22 @@ func (d *reasoningStreamDoer) handleReasoning(req *http.Request) (*http.Response
 	clientPub := d.parsePub(req.Header.Get(hdrClientPubKey))
 	cleartextReqBody := d.openRequest(d.readBody(req), hdrModel, nonce, ts)
 
-	const chunkID = "chunk-r"
-	aad := chatResponseAAD(e2eeRequestAlgo, hdrModel, chunkID, 0, respFieldReasoningContent, nonce, ts)
-	sealed := mustSealPub(d.t, clientPub, []byte(testReasoning), aad)
-	sealedChunk := string(mustCompact(d.t, mustParseBody(d.t,
-		`{"id":"`+chunkID+`","object":"chat.completion.chunk","model":"`+hdrModel+
-			`","choices":[{"index":0,"delta":{"reasoning_content":"`+sealed+`"}}]}`)))
-	cleartextChunk := string(mustCompact(d.t, mustParseBody(d.t,
-		`{"id":"`+chunkID+`","object":"chat.completion.chunk","model":"`+hdrModel+
-			`","choices":[{"index":0,"delta":{"reasoning_content":"`+testReasoning+`"}}]}`)))
+	frame := func(chunkID, reasoning string) (sealedFrame, cleartextFrame string) {
+		aad := chatResponseAAD(e2eeRequestAlgo, hdrModel, chunkID, 0, respFieldReasoningContent, nonce, ts)
+		sealed := mustSealPub(d.t, clientPub, []byte(reasoning), aad)
+		sealedFrame = string(mustCompact(d.t, mustParseBody(d.t,
+			`{"id":"`+chunkID+`","object":"chat.completion.chunk","model":"`+hdrModel+
+				`","choices":[{"index":0,"delta":{"reasoning_content":"`+sealed+`"}}]}`)))
+		cleartextFrame = string(mustCompact(d.t, mustParseBody(d.t,
+			`{"id":"`+chunkID+`","object":"chat.completion.chunk","model":"`+hdrModel+
+				`","choices":[{"index":0,"delta":{"reasoning_content":"`+reasoning+`"}}]}`)))
+		return sealedFrame, cleartextFrame
+	}
+	sealedFirst, cleartextFirst := frame("chunk-r", testReasoning)
+	sealedSecond, cleartextSecond := frame("chunk-r2", testReasoningTail)
 
-	wireBytes := []byte("data: " + sealedChunk + "\n\ndata: [DONE]\n\n")
-	cleartextWire := []byte("data: " + cleartextChunk + "\n\ndata: [DONE]\n\n")
+	wireBytes := []byte("data: " + sealedFirst + "\n\ndata: " + sealedSecond + "\n\ndata: [DONE]\n\n")
+	cleartextWire := []byte("data: " + cleartextFirst + "\n\ndata: " + cleartextSecond + "\n\ndata: [DONE]\n\n")
 	d.receipt = d.buildReceipt(cleartextReqBody, cleartextWire, wireBytes, hdrModel)
 	return d.streamResponse(http.StatusOK, wireBytes, testReceiptID), nil
 }

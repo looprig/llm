@@ -1,0 +1,33 @@
+{
+  "id": "chatcmpl-tool",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_weather_1",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Paris\"}"
+            }
+          }
+        ]
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 58,
+    "completion_tokens": 17,
+    "total_tokens": 75
+  }
+}

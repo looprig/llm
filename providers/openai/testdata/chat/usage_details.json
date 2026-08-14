@@ -1,0 +1,33 @@
+{
+  "id": "chatcmpl-usage-details",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-5",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Cached and reasoned.",
+        "refusal": null
+      },
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1024,
+    "completion_tokens": 96,
+    "total_tokens": 1120,
+    "prompt_tokens_details": {
+      "cached_tokens": 896,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 64,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  }
+}
