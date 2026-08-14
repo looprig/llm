@@ -27,16 +27,18 @@ Run these before pushing. CI runs the same.
 make fmt       # gofmt every first-party package directory in place
 make test      # go test -race ./...
 make secure    # lint + vuln:
-               #   lint = fmt-check + vendor-check + go vet + staticcheck + gosec
+               #   lint = fmt-check + go vet + staticcheck + gosec
                #   vuln = go mod verify + govulncheck
 ```
 
-The module **vendors** its dependency tree and builds against it: the
-Makefile exports `GOFLAGS=-mod=vendor` so a stray global `GOFLAGS` can't
-silently switch the build off the vendored tree. Do not run `go get`
-casually — `make vendor` refreshes `vendor/`, strips the `.git` pointer Go
-copies from the local `inference` replace target, and `vendor-check` then
-rejects any other Git metadata that leaked into the tree.
+**Dependencies are pinned, not vendored.** `go.mod` pins exact versions and
+`go.sum` verifies their content hashes, which is what makes a build
+reproducible. This module deliberately has no `vendor/`: a vendor tree is
+ignored under a `go.work` but silently satisfies a `GOWORK=off` build, so a
+stale one lets standalone verification pass against the vendored copy rather
+than the version `go.mod` actually pins — defeating the purpose of verifying
+standalone. Run `GOWORK=off go test ./...` to check this module against its
+real pinned dependencies. Do not run `go get` casually.
 
 `lint`'s `gosec` step is intentionally scoped to this module's own package
 directories (not a bare `./...` filesystem walk), so it doesn't descend into
@@ -70,8 +72,8 @@ reminder).
 - Don't force-push after review; add commits and let the reviewer squash.
 - Don't commit secrets, tokens, or credentials.
 - Don't add a new external dependency without prior discussion — this
-  module vendors everything and is a dependency of several sibling repos,
-  so new packages get reviewed before they're added.
+  module is a dependency of several sibling repos, so new packages get
+  reviewed before they're added.
 - Don't update `Makefile` or `go.mod` unless the change is the point of the
   PR.
 - Changes touching security-sensitive code — cryptography, TEE attestation
