@@ -67,7 +67,7 @@ func TestDocumentationManifestAndWorkflow(t *testing.T) {
 			t.Fatalf("workflow does not literally run %q", example.OfflineCommand)
 		}
 	}
-	if !strings.Contains(workflowText, "run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make test") {
+	if !strings.Contains(workflowText, "run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make check") {
 		t.Fatal("workflow does not run the native test target")
 	}
 	if !strings.Contains(makefileText, "test:\n\tgo test -race ./...") {

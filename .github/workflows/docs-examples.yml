@@ -23,4 +23,4 @@ jobs:
       - name: Run credential source and lease example
         run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache go run ./examples/credentials
       - name: Run native repository tests
-        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make test
+        run: GOWORK=off GOCACHE=/tmp/looprig-llm-docs-gocache make check
