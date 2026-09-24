@@ -114,6 +114,11 @@ func (r headerRoute) BuildRoute(baseURL string, req inference.Request, mode code
 	}
 	built.Header = r.headers.Clone()
 	if r.patch != nil {
+		// Cloning a nil http.Header yields nil; a patch must always be handed
+		// a writable map, including for a client with no static headers.
+		if built.Header == nil {
+			built.Header = make(http.Header)
+		}
 		r.patch(req, built.Header)
 	}
 	return built, nil

@@ -191,3 +191,36 @@ func TestNewProviderResolvesDefaultsAndOptions(t *testing.T) {
 		t.Errorf("reasoning_effort = %s, want %q", body["reasoning_effort"], `"high"`)
 	}
 }
+
+// TestNewPatchHeadersWithoutStaticHeaders pins that a PatchHeaders hook
+// receives a writable header map even when the client has no static headers:
+// cloning a nil http.Header yields nil, and a patch that sets a header on it
+// panicked on the first request.
+func TestNewPatchHeadersWithoutStaticHeaders(t *testing.T) {
+	t.Parallel()
+
+	headerCh := make(chan http.Header, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headerCh <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"id","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	selected := model.CustomModel(model.ProviderName(llm.ProviderOpenRouter), model.APIFormatOpenAI, srv.URL, "model")
+	client, err := compat.New(selected, compat.Config{
+		Authenticator: auth.Key("secret"),
+		PatchHeaders: func(_ inference.Request, headers http.Header) {
+			headers.Set("X-Patched", "yes")
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), inference.Request{Model: selected}); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if got := (<-headerCh).Get("X-Patched"); got != "yes" {
+		t.Errorf("X-Patched = %q, want yes", got)
+	}
+}
