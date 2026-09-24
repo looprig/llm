@@ -21,10 +21,13 @@ const Header = "x-opencode-session"
 // Responses, Anthropic) and both Invoke and Stream, after WithHeader's static
 // headers are in place.
 //
-// The value needs no checking here: every codec runs
-// inference.ValidateRequestFeatures before the route is built, which refuses an
-// identity that could not arrive byte-identical as a header value. Patch never
-// logs it.
+// The value is not checked here. Patch runs while the route is built, which
+// happens BEFORE the codec encodes the body, so an unsendable identity can be
+// copied into the header map first. That is safe: encoding then runs
+// inference.ValidateRequestFeatures, which refuses such an identity with
+// *inference.InvalidSessionIDError, and the request fails before any HTTP
+// request is made — the patched header never reaches the wire. Patch never
+// logs the value.
 //
 // An empty SessionID writes nothing. A caller with no conversation identity
 // then sends exactly what it sent before the field existed, instead of

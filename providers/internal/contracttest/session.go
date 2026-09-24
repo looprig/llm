@@ -1,6 +1,7 @@
 package contracttest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -42,6 +43,13 @@ func (s *sessionHeaderServer) start(t *testing.T, apiFormat model.APIFormat) *ht
 		s.mu.Lock()
 		s.headers = append(s.headers, r.Header.Clone())
 		s.mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		if apiFormat == model.APIFormatOpenAI && bytes.Contains(body, []byte(`"stream":true`)) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"model\":\"model\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch apiFormat {
 		case model.APIFormatAnthropic:
@@ -76,7 +84,8 @@ func (s *sessionHeaderServer) count() int {
 // in header, on every request format:
 //   - absent when the request carries no SessionID, so a caller that predates
 //     the field sends exactly what it sent before;
-//   - the SessionID verbatim, as the header's only value, when it does;
+//   - the SessionID verbatim, as the header's only value, when it does (on
+//     Invoke for every format, and on Stream for the OpenAI format);
 //   - an explicit non-empty WithHeader value wins over the per-request one;
 //   - an unsendable SessionID is refused locally with
 //     *inference.InvalidSessionIDError and no request reaches the provider.
@@ -105,6 +114,27 @@ func SessionHeader(t *testing.T, provider llm.Provider, key auth.APIKey, header 
 			}
 			if values := server.last(t).Values(header); len(values) != 1 || values[0] != contractSessionID {
 				t.Errorf("%s = %q, want exactly [%q]", header, values, contractSessionID)
+			}
+
+			if apiFormat == model.APIFormatOpenAI {
+				// The route (and so the header) is built per request mode;
+				// hold the Stream path to the same contract as Invoke.
+				reader, err := client.Stream(context.Background(), inference.Request{Model: selected, SessionID: contractSessionID})
+				if err != nil {
+					t.Fatalf("Stream() with SessionID error = %v", err)
+				}
+				for {
+					if _, err := reader.Next(); err != nil {
+						if !errors.Is(err, io.EOF) {
+							t.Fatalf("Stream.Next() error = %v", err)
+						}
+						break
+					}
+				}
+				_ = reader.Close()
+				if values := server.last(t).Values(header); len(values) != 1 || values[0] != contractSessionID {
+					t.Errorf("Stream: %s = %q, want exactly [%q]", header, values, contractSessionID)
+				}
 			}
 
 			pinned, err := construct(selected, key, simple.WithHeader(header, "operator-pinned"))
