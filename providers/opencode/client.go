@@ -7,6 +7,7 @@ import (
 	model "github.com/looprig/inference/model"
 
 	"github.com/looprig/llm"
+	"github.com/looprig/llm/providers/internal/opencodesession"
 	"github.com/looprig/llm/providers/internal/simple"
 )
 
@@ -24,6 +25,7 @@ func New(selected model.Model, key auth.APIKey, options ...Option) (inference.Cl
 		Provider:       llm.ProviderOpenCode,
 		DefaultBaseURL: DefaultBaseURL,
 		Authentication: auth.AuthAPIKey,
+		PatchHeaders:   opencodesession.Patch,
 	}
 	defaults := options
 	switch selected.APIFormat {
