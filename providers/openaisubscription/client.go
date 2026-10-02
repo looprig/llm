@@ -247,6 +247,13 @@ func (subscriptionCodec) EncodeRequest(req inference.Request, _ codec.RequestMod
 // (https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 // Content chunks are decoded by the generic codec unchanged. Provider error
 // messages are never retained: only bounded code tokens are.
+//
+// This is a deliberate, narrow fork of openairesponses' terminal collector:
+// the generic Responses contract accepts response.incomplete as a terminal
+// result, while this route does not. Content decoding (DecodeEvent) and the
+// completed envelope (DecodeResponse: model, usage, finish reason) still come
+// from the shared codec, so its fixes reach this provider. The fork can be
+// deleted once the shared codec offers a "completed-only" terminal option.
 func (subscriptionCodec) DecodeStream(resp *http.Response) (*stream.StreamReader[content.Chunk], error) {
 	frames, err := sse.DecodeStreamFrames(resp.Body)
 	if err != nil {

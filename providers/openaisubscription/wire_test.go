@@ -13,6 +13,7 @@ import (
 	"github.com/looprig/core/content"
 	"github.com/looprig/credentials/httpauth"
 	"github.com/looprig/inference"
+	"github.com/looprig/inference/codec/conformance"
 	"github.com/looprig/inference/failure"
 	"github.com/looprig/inference/model"
 	"github.com/looprig/inference/retry"
@@ -33,7 +34,14 @@ func TestSubscriptionRequestShapeFollowsRouteRequirements(t *testing.T) {
 	selected := model.CustomModel("openai-subscription", model.APIFormatOpenAIResponses, "", "gpt-test", model.WithTools())
 	var body map[string]json.RawMessage
 	c, err := New(selected, WithRoundTripper(roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The vendored official schema models the additional_tools item
+		// (AdditionalToolsItemParam: role developer, tools array).
+		conformance.MustValidateRequest(t, "openai-responses", "create_response_request", raw)
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatal(err)
 		}
 		return sseResponse(completedEvent), nil
@@ -76,7 +84,9 @@ func TestSubscriptionRequestWithoutToolsHasNoToolItem(t *testing.T) {
 	selected := model.CustomModel("openai-subscription", model.APIFormatOpenAIResponses, "", "gpt-test")
 	var body map[string]json.RawMessage
 	c, _ := New(selected, WithRoundTripper(roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		raw, _ := io.ReadAll(r.Body)
+		conformance.MustValidateRequest(t, "openai-responses", "create_response_request", raw)
+		_ = json.Unmarshal(raw, &body)
 		return sseResponse(completedEvent), nil
 	})))
 	if _, err := c.InvokeWithAuth(context.Background(), inference.Request{Model: selected}, httpauth.None()); err != nil {
