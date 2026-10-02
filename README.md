@@ -69,8 +69,13 @@ Known limits and behaviour a caller should know:
 - `providers/openaisubscription` implements the public-client Sign in with
   ChatGPT flow, verified OIDC identity, rotating refresh tokens, model discovery
   and revocation. Construct with `auto.NewWithAuth`; inference uses the public
-  OpenAI Responses endpoint with streaming and `store=false`. Arbitrary base
-  URLs and static API keys are refused for this provider. See the official
+  OpenAI Responses endpoint with streaming and `store=false`. That route
+  refuses `max_output_tokens`, `temperature` and `top_p` (they are omitted)
+  and flat top-level tools (function tools are sent as one leading
+  `additional_tools` input item). Only `response.completed` is success:
+  `response.incomplete` is `*IncompleteError`, and a plan usage limit is a
+  non-retryable `*UsageLimitError`. Arbitrary base URLs and static API keys
+  are refused for this provider. See the official
   [open-source token-sharing guide](https://developers.openai.com/siwc/token-sharing-open-source).
 - The older `providers/openai/subscription` registration gate remains a
   compatibility surface for the metered `openai` provider; use the separate
