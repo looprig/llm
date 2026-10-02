@@ -210,10 +210,14 @@ func Login(ctx context.Context, options LoginOptions) (refresh.State, Registrati
 	defer server.Close()
 	go func() { _ = server.Serve(listener) }()
 	query := url.Values{"client_id": {clientID}, "ext_agent_host_id": {options.HostID}, "response_type": {"code"}, "redirect_uri": {redirect}, "scope": {scopes}, "resource": {BaseURL}, "state": {pkce.State}, "nonce": {nonce}, "code_challenge_method": {"S256"}, "code_challenge": {pkce.Challenge}}
+	// A retained ID token is deliberately NOT sent as id_token_hint: this URL
+	// becomes a browser-opener process argument, readable by process
+	// inspection and command auditing. The hint is optional; without it a
+	// returning sign-in shows the account selector and then redirects
+	// (https://developers.openai.com/siwc/token-sharing-open-source/sign-in).
+	// The returned identity is still checked against Previous.Subject below.
 	if options.Previous == nil {
 		query.Set("agent_name_hint", "Carbon")
-	} else if options.Previous.IDToken != "" {
-		query.Set("id_token_hint", options.Previous.IDToken)
 	}
 	if err := options.OpenBrowser(AuthorizationURL + "?" + query.Encode()); err != nil {
 		return refresh.State{}, Registration{}, ErrLogin

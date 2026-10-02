@@ -241,7 +241,11 @@ func TestReauthenticationRefusesAccountSwitch(t *testing.T) {
 		u, _ := url.Parse(raw)
 		q := u.Query()
 		nonce = q.Get("nonce")
-		if q.Get("client_id") != "oaiapp_fixture" || q.Has("agent_name_hint") || q.Get("id_token_hint") != "previous-id-token" {
+		// The ID token never enters the authorization URL: the URL becomes a
+		// browser-opener argument visible to process inspection. Without the
+		// hint OpenAI shows the account selector, then redirects:
+		// https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+		if q.Get("client_id") != "oaiapp_fixture" || q.Has("agent_name_hint") || q.Has("id_token_hint") || strings.Contains(raw, "previous-id-token") {
 			t.Errorf("wrong reauthorization request: %v", q)
 		}
 		redirect, _ := url.Parse(q.Get("redirect_uri"))
