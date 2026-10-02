@@ -28,6 +28,7 @@ Providers (`llm.Provider` value, package under `providers/`, accepted
 |---|---|---|---|
 | `anthropic` | `anthropic` | anthropic | API key |
 | `openai` | `openai` | openai, openai-responses | API key |
+| `openai-subscription` | `openaisubscription` | openai-responses | OAuth (ChatGPT plan) |
 | `google` | `gemini` | gemini | API key |
 | `xai` | `xai` | openai, openai-responses | API key |
 | `bedrock` | `bedrock` | anthropic, bedrock-converse | SigV4 |
@@ -65,9 +66,16 @@ Known limits and behaviour a caller should know:
   environment variables when an argument is empty, for example
   `GITLAB_TOKEN`, `SNOWFLAKE_CORTEX_TOKEN`/`SNOWFLAKE_CORTEX_PAT`, and the Azure
   resource name and SAP AI Core settings.
-- `providers/anthropic/subscription` and `providers/openai/subscription` only
-  refuse third-party subscription registration. They contain no credential or
-  transport implementation.
+- `providers/openaisubscription` implements the public-client Sign in with
+  ChatGPT flow, verified OIDC identity, rotating refresh tokens, model discovery
+  and revocation. Construct with `auto.NewWithAuth`; inference uses the public
+  OpenAI Responses endpoint with streaming and `store=false`. Arbitrary base
+  URLs and static API keys are refused for this provider. See the official
+  [open-source token-sharing guide](https://developers.openai.com/siwc/token-sharing-open-source).
+- The older `providers/openai/subscription` registration gate remains a
+  compatibility surface for the metered `openai` provider; use the separate
+  provider above for subscription access. `providers/anthropic/subscription`
+  still refuses third-party subscription registration.
 - Exact provider context counters (`auto.NewCounter`) exist for `google`,
   `openai`, `anthropic` and `xai`. `bedrock` needs `bedrock.NewCounter`. Other
   providers return `*llm.CounterSupportError`.
@@ -117,7 +125,7 @@ pass a `credentials.Source` to `auto.NewWithAuth`. Runnable programs:
 ## Where it sits
 
 Tier 3 in the Looprig workspace. Direct Looprig dependencies: `core`,
-`credentials`, `inference`, and `secrets` (tests only). It is consumed by
+`credentials`, `inference`, and `secrets`. It is consumed by
 products and tools that need real provider clients, such as `carbon`, `tests`
 and `pluto/cmd/pluto`.
 

@@ -43,10 +43,11 @@ func testTLSRoots(srv *httptest.Server) *x509.CertPool {
 
 func TestDynamicSupportMatrixIsExplicit(t *testing.T) {
 	want := map[llm.Provider]map[model.APIFormat]struct{}{
-		llm.ProviderOpenAI:     {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
-		llm.ProviderOpenRouter: {model.APIFormatOpenAI: {}},
-		llm.ProviderAnthropic:  {model.APIFormatAnthropic: {}},
-		llm.ProviderLMStudio:   {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
+		llm.ProviderOpenAISubscription: {model.APIFormatOpenAIResponses: {}},
+		llm.ProviderOpenAI:             {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
+		llm.ProviderOpenRouter:         {model.APIFormatOpenAI: {}},
+		llm.ProviderAnthropic:          {model.APIFormatAnthropic: {}},
+		llm.ProviderLMStudio:           {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
 	}
 	if !reflect.DeepEqual(dynamicSupport, want) {
 		t.Fatalf("dynamic support matrix = %#v, want %#v", dynamicSupport, want)

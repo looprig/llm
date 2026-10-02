@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const unsupportedRegistrationMessage = "openai subscription registration unavailable: no sanctioned third-party OAuth registration is available for consumer inference"
+const unsupportedRegistrationMessage = "openai provider uses API keys; use the separate openai-subscription provider for ChatGPT plan OAuth"
 
 // UnsupportedRegistrationError is the redaction-safe, typed failure returned
 // by a blocked subscription registration gate. It intentionally carries no

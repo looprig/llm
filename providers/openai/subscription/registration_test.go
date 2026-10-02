@@ -141,7 +141,7 @@ func TestRequireReturnsTypedRedactionSafeError(t *testing.T) {
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("Require() error = %T, want *UnsupportedRegistrationError", err)
 	}
-	const requiredMessage = "no sanctioned third-party OAuth registration is available"
+	const requiredMessage = "use the separate openai-subscription provider"
 	if !strings.Contains(err.Error(), requiredMessage) {
 		t.Fatalf("Require() error = %q, want phrase %q", err, requiredMessage)
 	}

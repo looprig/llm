@@ -67,6 +67,7 @@ import (
 	ollamaprovider "github.com/looprig/llm/providers/ollama"
 	ollamacloudprovider "github.com/looprig/llm/providers/ollamacloud"
 	openaiprovider "github.com/looprig/llm/providers/openai"
+	"github.com/looprig/llm/providers/openaisubscription"
 	opencodeprovider "github.com/looprig/llm/providers/opencode"
 	opencodegoprovider "github.com/looprig/llm/providers/opencode-go"
 	"github.com/looprig/llm/providers/openrouter"
@@ -290,10 +291,11 @@ func newWithAuth(selected model.Model, source credentials.Source, constructorKey
 }
 
 var dynamicSupport = map[llm.Provider]map[model.APIFormat]struct{}{
-	llm.ProviderOpenAI:     {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
-	llm.ProviderOpenRouter: {model.APIFormatOpenAI: {}},
-	llm.ProviderAnthropic:  {model.APIFormatAnthropic: {}},
-	llm.ProviderLMStudio:   {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
+	llm.ProviderOpenAISubscription: {model.APIFormatOpenAIResponses: {}},
+	llm.ProviderOpenAI:             {model.APIFormatOpenAI: {}, model.APIFormatOpenAIResponses: {}},
+	llm.ProviderOpenRouter:         {model.APIFormatOpenAI: {}},
+	llm.ProviderAnthropic:          {model.APIFormatAnthropic: {}},
+	llm.ProviderLMStudio:           {model.APIFormatOpenAI: {}, model.APIFormatAnthropic: {}},
 }
 
 func dynamicPolicySupported(selected model.Model) bool {
@@ -327,6 +329,9 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options,
 		return nil, err
 	}
 	p := llm.Provider(selected.Provider)
+	if p == llm.ProviderOpenAISubscription && !dynamic {
+		return nil, &CredentialNotConstructibleError{Provider: p, Kind: llm.AuthOAuth, Use: "auto.NewWithAuth"}
+	}
 	kind, err := p.RequiredAuth()
 	if err != nil {
 		return nil, err
@@ -383,6 +388,12 @@ func constructInnerConfig(selected model.Model, key auth.APIKey, config options,
 			return genericHTTP(selected, auth.Key(key))
 		}
 		return genericHTTPWithAuth(selected)
+	case llm.ProviderOpenAISubscription:
+		var opts []openaisubscription.Option
+		if config.tlsRootCAs != nil {
+			opts = append(opts, openaisubscription.WithTLSRootCAs(config.tlsRootCAs))
+		}
+		return openaisubscription.New(selected, opts...)
 	case llm.ProviderOpenAI:
 		var options []openaiprovider.Option
 		if config.tlsRootCAs != nil {

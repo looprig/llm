@@ -20,6 +20,7 @@ const (
 	ProviderChutes                 Provider = "chutes"
 	ProviderOpenRouter             Provider = "openrouter"
 	ProviderOpenAI                 Provider = "openai"
+	ProviderOpenAISubscription     Provider = "openai-subscription"
 	ProviderAzure                  Provider = "azure"
 	ProviderAzureCognitiveServices Provider = "azure-cognitive-services"
 	ProviderAnthropic              Provider = "anthropic"

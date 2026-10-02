@@ -23,7 +23,7 @@ func (p Provider) RequiresKey() (bool, error) {
 		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSynthetic, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
 		return true, nil
-	case ProviderGitLab, ProviderGitHubCopilot, ProviderGoogleVertex, ProviderGoogleVertexAnthropic, ProviderSAP, ProviderSnowflakeCortex:
+	case ProviderOpenAISubscription, ProviderGitLab, ProviderGitHubCopilot, ProviderGoogleVertex, ProviderGoogleVertexAnthropic, ProviderSAP, ProviderSnowflakeCortex:
 		return false, nil
 	case ProviderBedrock:
 		// Bedrock authenticates with SigV4 credentials, not an API key; this legacy
@@ -47,7 +47,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 		return f == model.APIFormatOpenAI
 	case ProviderOpenAI, ProviderXAI:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
-	case ProviderAzure:
+	case ProviderOpenAISubscription, ProviderAzure:
 		return f == model.APIFormatOpenAIResponses
 	case ProviderVenice:
 		return f == model.APIFormatOpenAI || f == model.APIFormatOpenAIResponses
@@ -98,7 +98,7 @@ func (p Provider) supportsAPIFormat(f model.APIFormat) bool {
 // with no default returns false, so ValidateModel keeps requiring an explicit base.
 func (p Provider) allowsEmptyBaseURL() bool {
 	switch p {
-	case ProviderBedrock, ProviderChutes, ProviderPhala, ProviderOpenRouter, ProviderOpenAI, ProviderAzure, ProviderAzureCognitiveServices,
+	case ProviderBedrock, ProviderChutes, ProviderPhala, ProviderOpenRouter, ProviderOpenAI, ProviderOpenAISubscription, ProviderAzure, ProviderAzureCognitiveServices,
 		ProviderAnthropic, ProviderXAI, ProviderLMStudio, ProviderGoogle, Provider302AI, ProviderAtomicChat, ProviderBaseten,
 		ProviderCerebras, ProviderCloudflareAIGateway, ProviderCloudflareWorkersAI, ProviderCortecs, ProviderDeepSeek,
 		ProviderDeepInfra, ProviderDigitalOcean, ProviderFrogBot, ProviderFireworks, ProviderGitLab, ProviderGitHubCopilot,
@@ -128,7 +128,7 @@ func (p Provider) RequiredAuth() (auth.AuthKind, error) {
 		ProviderLLMGateway, ProviderSTACKIT, ProviderOVHCloud, ProviderScaleway, ProviderSynthetic, ProviderTogetherAI, ProviderVenice,
 		ProviderVercel, ProviderZAI, ProviderZenMux:
 		return auth.AuthAPIKey, nil
-	case ProviderGitLab, ProviderGitHubCopilot:
+	case ProviderOpenAISubscription, ProviderGitLab, ProviderGitHubCopilot:
 		return AuthOAuth, nil
 	case ProviderGoogleVertex, ProviderGoogleVertexAnthropic:
 		return AuthGCP, nil

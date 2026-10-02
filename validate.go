@@ -52,5 +52,8 @@ func ValidateModel(m model.Model) error {
 	if m.BaseURL == "" && !p.allowsEmptyBaseURL() {
 		return &model.ValidationError{Field: "BaseURL", Reason: "must not be empty"}
 	}
+	if p == ProviderOpenAISubscription && m.BaseURL != "" && m.BaseURL != "https://api.openai.com/v1" {
+		return &model.ValidationError{Field: "BaseURL", Reason: "subscription requires the public OpenAI v1 endpoint"}
+	}
 	return nil
 }

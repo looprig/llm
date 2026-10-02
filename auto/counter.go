@@ -82,7 +82,7 @@ func resolveCounter(provider llm.Provider, apiFormat model.APIFormat, key auth.A
 			Reason:    llm.CounterSupportAPIFormatUnavailable,
 			APIFormat: apiFormat,
 		}
-	case llm.ProviderAzure, llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio,
+	case llm.ProviderOpenAISubscription, llm.ProviderAzure, llm.ProviderChutes, llm.ProviderPhala, llm.ProviderOpenRouter, llm.ProviderLMStudio,
 		llm.ProviderAzureCognitiveServices, llm.Provider302AI, llm.ProviderAtomicChat, llm.ProviderBaseten,
 		llm.ProviderCerebras, llm.ProviderCloudflareAIGateway, llm.ProviderCloudflareWorkersAI, llm.ProviderCortecs,
 		llm.ProviderDeepSeek, llm.ProviderDeepInfra, llm.ProviderDigitalOcean, llm.ProviderFrogBot, llm.ProviderFireworks,

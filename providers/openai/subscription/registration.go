@@ -1,7 +1,8 @@
-// Package subscription exposes the OpenAI subscription registration policy
-// boundary. It deliberately has no credential, transport, or discovery
-// implementation: the current policy is to reject unsanctioned third-party
-// registration attempts before they can become an inference flow.
+// Package subscription retains the historical registration gate for the
+// metered openai provider. Its August evidence snapshot is compatibility metadata.
+//
+// Use github.com/looprig/llm/providers/openaisubscription for the
+// separate OAuth provider implementing Sign in with ChatGPT plan usage.
 package subscription
 
 import (
