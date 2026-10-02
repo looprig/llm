@@ -12,9 +12,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/looprig/credentials"
@@ -33,6 +35,7 @@ const (
 	DiscoveryURL     = Issuer + "/.well-known/openid-configuration"
 	scopes           = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 	maxResponseBytes = 1 << 20
+	maxErrorBytes    = 64 << 10
 )
 
 var (
@@ -40,8 +43,19 @@ var (
 	ErrIdentity   = errors.New("openai-subscription: identity verification failed")
 	ErrPermission = errors.New("openai-subscription: ChatGPT plan usage permission is required; sign in again and allow plan usage")
 	ErrToken      = errors.New("openai-subscription: token exchange failed; sign in again")
-	ErrModels     = errors.New("openai-subscription: could not retrieve account models")
-	ErrRevoke     = errors.New("openai-subscription: remote revocation was not confirmed; disconnect Carbon in ChatGPT settings")
+	// ErrTokenUnavailable is a token-endpoint failure that did not consume the
+	// grant (a connection that never sent the request, throttling or a server
+	// error). Credentials are preserved; retry with bounded backoff.
+	ErrTokenUnavailable = errors.New("openai-subscription: token endpoint temporarily unavailable; retry later")
+	// ErrTokenUncertain is a refresh whose request may have reached OpenAI but
+	// whose response was lost or unusable. The refresh token may already be
+	// rotated, so it is never submitted again; sign in again.
+	ErrTokenUncertain = errors.New("openai-subscription: token refresh outcome unknown; sign in again")
+	// ErrClient is invalid_client: the saved client registration was
+	// rejected. Retrying or refreshing cannot fix it.
+	ErrClient = errors.New("openai-subscription: OAuth client registration rejected; check the saved client or sign in again")
+	ErrModels = errors.New("openai-subscription: could not retrieve account models")
+	ErrRevoke = errors.New("openai-subscription: remote revocation was not confirmed; disconnect Carbon in ChatGPT settings")
 )
 
 // Registration is private account continuity, never display metadata. Persist
@@ -254,10 +268,12 @@ func hasPlanPermission(scope string) bool {
 func exchangeTokens(ctx context.Context, client *http.Client, form url.Values, initial bool) (tokenResponse, error) {
 	var tokens tokenResponse
 	if err := requestJSON(ctx, client, http.MethodPost, TokenURL, form, nil, &tokens); err != nil {
-		return tokenResponse{}, ErrToken
+		return tokenResponse{}, tokenFailure(err, !initial)
 	}
 	if !strings.EqualFold(tokens.TokenType, "Bearer") || tokens.AccessToken == "" || tokens.RefreshToken == "" || tokens.ExpiresIn <= 0 || tokens.ExpiresIn > 86400 || len(tokens.AccessToken) > 32<<10 || len(tokens.RefreshToken) > 32<<10 {
-		return tokenResponse{}, ErrToken
+		// A 200 means OpenAI processed the grant; a refresh token may have
+		// rotated even though this response cannot be used.
+		return tokenResponse{}, tokenFailure(&requestFailure{sent: true, invalid: true}, !initial)
 	}
 	if initial && tokens.IDToken == "" {
 		return tokenResponse{}, ErrIdentity
@@ -337,56 +353,162 @@ func NewSource(ctx context.Context, input credentials.FactoryInput) (credentials
 	if _, err := RegistrationFromState(state); err != nil {
 		return nil, err
 	}
-	return refresh.New(refresh.Options{Context: ctx, Reference: input.Reference, Descriptor: input.Descriptor, State: input.State, Store: input.Store, Resolver: input.Resolver, Preconditions: input.Preconditions, Coordinator: input.RefreshCoordinator, StateSharing: input.StateSharing, Clock: input.Clock, ExpirySkew: time.Minute, PersistAccessToken: true, Exchange: func(ctx context.Context, state refresh.State) (refresh.TokenResponse, error) {
+	return refresh.New(refresh.Options{Context: ctx, Reference: input.Reference, Descriptor: input.Descriptor, State: input.State, Store: input.Store, Resolver: input.Resolver, Preconditions: input.Preconditions, Coordinator: input.RefreshCoordinator, StateSharing: input.StateSharing, Clock: input.Clock, ExpirySkew: time.Minute, PersistAccessToken: true, Exchange: refreshExchange(input.HTTPClient)})
+}
+
+// refreshExchange is the provider half of refresh.Source. Every failure is
+// classified for the source (see tokenFailure), which records an ambiguous
+// or rejected grant durably so no process submits it again.
+func refreshExchange(client *http.Client) refresh.ExchangeFunc {
+	return func(ctx context.Context, state refresh.State) (refresh.TokenResponse, error) {
 		r, err := RegistrationFromState(state)
 		if err != nil {
-			return refresh.TokenResponse{}, err
+			// Missing plan permission or unusable continuity: only a new
+			// sign-in can repair it.
+			return refresh.TokenResponse{}, classify(err, refresh.ErrReauthenticationRequired)
 		}
 		raw := state.RefreshToken.Bytes()
 		defer clear(raw)
-		tokens, err := exchangeTokens(ctx, input.HTTPClient, url.Values{"grant_type": {"refresh_token"}, "client_id": {r.ClientID}, "refresh_token": {string(raw)}, "resource": {BaseURL}}, false)
+		tokens, err := exchangeTokens(ctx, client, url.Values{"grant_type": {"refresh_token"}, "client_id": {r.ClientID}, "refresh_token": {string(raw)}, "resource": {BaseURL}}, false)
 		if err != nil {
 			return refresh.TokenResponse{}, err
 		}
-		// OAuth permits scope omission on refresh; it retains the original grant.
+		// OAuth permits scope omission on refresh; it retains the original
+		// grant. A reduced grant is recorded rather than refused: the
+		// rotation already happened, so discarding it would lose the only
+		// usable refresh token. RegistrationFromState refuses the stored
+		// state with ErrPermission at its next use, which asks for a sign-in
+		// that re-grants plan usage (OpenAI: retain the sign-in, mark plan
+		// usage disabled).
 		if tokens.Scope != "" {
-			if !hasPlanPermission(tokens.Scope) {
-				return refresh.TokenResponse{}, ErrPermission
-			}
 			r.Scopes = tokens.Scope
 		}
-		// Retain the last verified ID token as a hint; a refresh token response is
-		// not a new interactive authentication or account switch.
+		// Retain the last verified ID token; a refresh token response is not a
+		// new interactive authentication or account switch.
 		next, err := tokenState(tokens, r)
 		if err != nil {
-			return refresh.TokenResponse{}, err
+			return refresh.TokenResponse{}, classify(ErrTokenUncertain, refresh.ErrAmbiguousRotation)
 		}
 		return refresh.TokenResponse{AccessToken: next.AccessToken, RefreshToken: next.RefreshToken, RefreshTokenSet: true, Generation: next.Generation, ExpiresAt: next.ExpiresAt, ProviderData: next.ProviderData, PersistAccessToken: true}, nil
-	}})
+	}
+}
+
+// unusableGrantCodes are OpenAI's documented "clear unusable tokens and
+// repeat OAuth" refresh errors:
+// https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery
+var unusableGrantCodes = map[string]bool{
+	"invalid_grant": true, "invalid_refresh_token": true, "token_expired": true,
+	"refresh_token_expired": true, "refresh_token_invalidated": true, "refresh_token_reused": true,
+}
+
+// tokenFailure maps a token-endpoint failure to a public error plus the
+// credentials/refresh class that drives recovery. refreshing is false for the
+// interactive authorization-code exchange, where nothing is reused.
+func tokenFailure(err error, refreshing bool) error {
+	var failure *requestFailure
+	if !errors.As(err, &failure) {
+		return err
+	}
+	switch {
+	case failure.status != 0:
+		switch {
+		case unusableGrantCodes[failure.code]:
+			return classify(ErrToken, refresh.ErrReauthenticationRequired)
+		case failure.code == "invalid_client":
+			return ErrClient
+		case failure.status == http.StatusTooManyRequests || failure.status >= 500:
+			return classify(ErrTokenUnavailable, refresh.ErrExchangeTemporary)
+		default:
+			return ErrToken
+		}
+	case failure.sent && refreshing:
+		// The grant may have been consumed; this takes precedence over a
+		// cancellation that arrived after the request was sent.
+		return classify(ErrTokenUncertain, refresh.ErrAmbiguousRotation, failure.canceled)
+	case failure.canceled != nil:
+		return credentials.NewCanceledError(failure.canceled)
+	case failure.sent:
+		// An authorization code is single-use; a lost response means login
+		// must start over.
+		return ErrToken
+	default:
+		return classify(ErrTokenUnavailable, refresh.ErrExchangeTemporary)
+	}
+}
+
+// classifiedError keeps a provider-facing message while matching the
+// recovery classes it carries with errors.Is.
+type classifiedError struct {
+	public  error
+	classes []error
+}
+
+func classify(public error, classes ...error) error {
+	e := &classifiedError{public: public}
+	for _, class := range classes {
+		if class != nil {
+			e.classes = append(e.classes, class)
+		}
+	}
+	return e
+}
+func (e *classifiedError) Error() string { return e.public.Error() }
+func (e *classifiedError) Unwrap() []error {
+	return append([]error{e.public}, e.classes...)
+}
+
+// requestFailure is requestJSON's bounded failure description. It never
+// retains a response body, header, or the request.
+type requestFailure struct {
+	// sent reports that the request may have reached the server.
+	sent bool
+	// status and code describe a definitive non-200 response; code is set
+	// only when it is a short machine token.
+	status int
+	code   string
+	// invalid is a 200 whose body could not be read or decoded.
+	invalid bool
+	// canceled is the caller's context error when it ended the request.
+	canceled error
+}
+
+func (f *requestFailure) Error() string {
+	if f.status != 0 {
+		return fmt.Sprintf("openai-subscription: request failed with status %d", f.status)
+	}
+	return "openai-subscription: request failed"
 }
 
 // requestJSON never follows provider redirects or retains response bodies in
-// errors, and bounds both time and response size.
+// errors, and bounds both time and response size. Failures are a
+// *requestFailure that records whether the request may have been sent.
 func requestJSON(ctx context.Context, client *http.Client, method, endpoint string, form url.Values, auth func(*http.Request) error, out any) error {
 	if ctx == nil {
 		return credentials.ErrNilContext
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := ctx.Err(); err != nil {
+		return &requestFailure{canceled: err}
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	var wrote atomic.Bool
+	traceCtx := httptrace.WithClientTrace(timeoutCtx, &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) { wrote.Store(true) },
+	})
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	req, err := http.NewRequestWithContext(traceCtx, method, endpoint, body)
 	if err != nil {
-		return ErrToken
+		return &requestFailure{}
 	}
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	if auth != nil {
 		if err := auth(req); err != nil {
-			return ErrToken
+			return &requestFailure{}
 		}
 	}
 	hc := http.Client{Timeout: 30 * time.Second}
@@ -396,22 +518,68 @@ func requestJSON(ctx context.Context, client *http.Client, method, endpoint stri
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := hc.Do(req)
 	if err != nil {
-		return ErrToken
+		return &requestFailure{sent: wrote.Load() || !reportsWriteProgress(hc.Transport) && !failedBeforeSending(err), canceled: ctx.Err()}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return ErrToken
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBytes))
+		defer clear(raw)
+		return &requestFailure{sent: true, status: response.StatusCode, code: oauthErrorCode(raw)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(raw) > maxResponseBytes {
-		return ErrToken
+		return &requestFailure{sent: true, invalid: true, canceled: ctx.Err()}
 	}
 	defer clear(raw)
 	if out == nil {
 		return nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return ErrToken
+		return &requestFailure{sent: true, invalid: true}
 	}
 	return nil
+}
+
+// reportsWriteProgress reports whether the transport calls httptrace's
+// WroteRequest, so its absence proves the request was not sent. A
+// caller-owned RoundTripper gives no such guarantee.
+func reportsWriteProgress(rt http.RoundTripper) bool {
+	if rt == nil {
+		return true
+	}
+	_, ok := rt.(*http.Transport)
+	return ok
+}
+
+// failedBeforeSending recognizes failures that precede any request byte: name
+// resolution and connection establishment.
+func failedBeforeSending(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
+}
+
+// oauthErrorCode extracts a bounded OAuth error code from either the RFC 6749
+// shape {"error":"invalid_grant"} or a nested {"error":{"code":"..."}}.
+func oauthErrorCode(raw []byte) string {
+	var body struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil || len(body.Error) == 0 {
+		return ""
+	}
+	var code string
+	if json.Unmarshal(body.Error, &code) != nil {
+		var nested struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal(body.Error, &nested) != nil {
+			return ""
+		}
+		code = nested.Code
+	}
+	return safeToken(code)
 }

@@ -131,7 +131,7 @@ func TestRequestJSONRefusesRedirectsErrorsAndOversizedBodies(t *testing.T) {
 		})}
 		var out map[string]any
 		err := requestJSON(context.Background(), client, http.MethodPost, TokenURL, url.Values{"a": {"b"}}, nil, &out)
-		if !errors.Is(err, ErrToken) || requests != 1 {
+		if err == nil || requests != 1 {
 			t.Errorf("%s: err = %v requests = %d", name, err, requests)
 		}
 		if err != nil && strings.Contains(err.Error(), "secret detail") {
