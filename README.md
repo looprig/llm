@@ -136,7 +136,7 @@ and `pluto/cmd/pluto`.
 
 ## Development
 
-The Go baseline is 1.26.8. The module does not vendor. Verify it standalone:
+The Go baseline is 1.26.9. The module does not vendor. Verify it standalone:
 
 ```sh
 GOWORK=off go test ./...
